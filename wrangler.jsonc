@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "expense-bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-26",
+  "observability": { "enabled": true },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "expense-bot",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "BOT_INFO": "{}",
+    "ALLOWED_USER_IDS": "[]",
+    "HOUSEHOLD_TZ": "Asia/Manila"
+  },
+  "secrets": {
+    "required": ["BOT_TOKEN", "WEBHOOK_SECRET"]
+  }
+}

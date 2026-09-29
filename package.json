@@ -1,0 +1,24 @@
+{
+  "name": "expense-bot",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "test": "vitest run && node --test \"scripts/**/*.test.mjs\"",
+    "typecheck": "wrangler types --strict-vars=false && tsc --noEmit && tsc --noEmit -p test/tsconfig.json",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "setup": "node scripts/setup.mjs",
+    "db:migrate:local": "wrangler d1 migrations apply expense-bot --local",
+    "db:migrate:remote": "wrangler d1 migrations apply expense-bot --remote"
+  },
+  "dependencies": {
+    "grammy": "1.46.0"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "1.3.1",
+    "@types/node": "24.19.0",
+    "typescript": "7.0.2",
+    "vitest": "4.1.11",
+    "wrangler": "4.143.0"
+  }
+}
