@@ -38,7 +38,7 @@ function migrateToNotice(from: unknown = { id: MEMBER_A.id, is_bot: false, first
     message_id: 50,
     date: 1_780_000_000,
     chat: { id: OLD_GROUP_ID, type: "group", title: "Household" },
-    ...(from === undefined ? {} : { from }),
+    ...(from === null ? {} : { from }),
     migrate_to_chat_id: NEW_SUPERGROUP_ID,
   }, 500);
 }
@@ -49,7 +49,7 @@ function migrateFromNotice(from: unknown = GROUP_ANONYMOUS_BOT) {
     message_id: 1,
     date: 1_780_000_000,
     chat: { id: NEW_SUPERGROUP_ID, type: "supergroup", title: "Household" },
-    ...(from === undefined ? {} : { from }),
+    ...(from === null ? {} : { from }),
     sender_chat: { id: NEW_SUPERGROUP_ID, type: "supergroup", title: "Household" },
     migrate_from_chat_id: OLD_GROUP_ID,
   }, 501);
@@ -199,7 +199,7 @@ describe("classifyUpdate rule 6: notice in the allowed chat", () => {
   });
 
   it("reports a null user id when the notice has no sender", () => {
-    expect(classify(migrateToNotice(undefined), OLD_GROUP_ID)).toEqual({
+    expect(classify(migrateToNotice(null), OLD_GROUP_ID)).toEqual({
       action: "migrate",
       kind: "message",
       chatId: OLD_GROUP_ID,
@@ -221,7 +221,7 @@ describe("classifyUpdate rule 7: notice in the new supergroup", () => {
   });
 
   it("reports a null user id when the notice has no sender", () => {
-    expect(classify(migrateFromNotice(undefined), OLD_GROUP_ID)).toEqual({
+    expect(classify(migrateFromNotice(null), OLD_GROUP_ID)).toEqual({
       action: "migrate",
       kind: "message",
       chatId: NEW_SUPERGROUP_ID,
