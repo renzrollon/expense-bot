@@ -1,6 +1,56 @@
+# macOS
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# Node (future app stack; Change 1 pins versions at apply)
+
+*.log
+*.tsbuildinfo
+next-env.d.ts
 node_modules/
 .wrangler/
 dist/
 worker-configuration.d.ts
 .dev.vars*
 !.dev.vars.example
+
+# Local SQLite data (never the source of truth; see migrations/)
+/data/
+
+# Web / build artifacts
+.next/
+out/
+dist/
+build/
+coverage/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# Secrets and local env
+.env
+.env*.local
+*.pem
+
+# Agent runtime (generated session state, never committed)
+.agents/handoff/
+.claude/handoff/
+.claude/settings.local.json
+.claude/graph/
+.claude/metrics/
+.claude/autonomy.json
+.claude/testing/
+.claude/pending-approval/
+.claude/.cc-writes/
+.claude/learning/
+.claude/plans/
+.claude/ship/
+.cursor/
+
+# Backups
+*.bak
+*.bak.*
