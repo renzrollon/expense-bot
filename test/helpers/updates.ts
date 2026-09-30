@@ -85,6 +85,44 @@ export function photoUpdate(options: PhotoOptions = {}): Update {
   };
 }
 
+/** A sticker message, which carries no `text`. */
+export function stickerUpdate(options: UpdateOptions = {}): Update {
+  const b = base(options);
+  return {
+    update_id: b.updateId,
+    message: {
+      message_id: b.messageId,
+      date: b.date,
+      chat: b.chat,
+      from: b.from,
+      sticker: {
+        file_id: "sticker-1",
+        file_unique_id: "u-sticker-1",
+        type: "regular",
+        width: 512,
+        height: 512,
+        is_animated: false,
+        is_video: false,
+      },
+    },
+  };
+}
+
+/** A voice note, which carries no `text`. */
+export function voiceUpdate(options: UpdateOptions = {}): Update {
+  const b = base(options);
+  return {
+    update_id: b.updateId,
+    message: {
+      message_id: b.messageId,
+      date: b.date,
+      chat: b.chat,
+      from: b.from,
+      voice: { file_id: "voice-1", file_unique_id: "u-voice-1", duration: 3 },
+    },
+  };
+}
+
 export function editedMessageUpdate(options: MessageOptions & { editDate?: number }): Update {
   const b = base(options);
   const entities = commandEntities(options.text);

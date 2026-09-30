@@ -1,13 +1,13 @@
 import { beforeEach } from "vitest";
 
-export const TABLES = ["updates", "members", "settings"] as const;
+export const TABLES = ["updates", "members", "settings", "expenses", "keyword_map"] as const;
 
-/** Empties the three gateway tables. */
+/** Empties every table in TABLES. */
 export async function resetTables(db: D1Database): Promise<void> {
   await db.batch(TABLES.map((table) => db.prepare(`DELETE FROM ${table}`)));
 }
 
-/** Registers a beforeEach hook that empties the three tables. */
+/** Registers a beforeEach hook that empties every table in TABLES. */
 export function useCleanTables(db: D1Database): void {
   beforeEach(async () => {
     await resetTables(db);
@@ -20,6 +20,14 @@ export interface FailingDb {
   failAll(): void;
   /** A statement fails when the predicate accepts its SQL text. */
   failWhen(predicate: (sql: string) => boolean): void;
+  /**
+   * Inside `db.batch`, each statement the predicate accepts, by its normalised SQL
+   * text and its position in the batch, is replaced by `SELECT json('{')` and the
+   * batch is sent to D1. SQLite prepares that statement and refuses it when it
+   * runs, so the statements before it really run and D1 must roll them back.
+   * Statements outside a batch are unaffected.
+   */
+  failInsideBatch(predicate: (sql: string, position: number) => boolean): void;
   /** Stops all failing. */
   heal(): void;
 }
@@ -28,6 +36,9 @@ export interface FailingDb {
 export function normalizeSql(sql: string): string {
   return sql.replace(/\s+/g, " ").trim();
 }
+
+/** Prepares cleanly and fails when it runs, with "malformed JSON". */
+const MALFORMED_AT_RUN = "SELECT json('{')";
 
 interface Wrapped {
   real: D1PreparedStatement;
@@ -41,6 +52,7 @@ interface Wrapped {
 export function failingDb(real: D1Database): FailingDb {
   let all = false;
   let predicate: ((sql: string) => boolean) | null = null;
+  let insideBatch: ((sql: string, position: number) => boolean) | null = null;
   const wrapped = new WeakMap<object, Wrapped>();
 
   const shouldFail = (sql: string): boolean =>
@@ -83,7 +95,13 @@ export function failingDb(real: D1Database): FailingDb {
         return async (statements: D1PreparedStatement[]) => {
           const entries = statements.map((statement) => wrapped.get(statement));
           for (const entry of entries) if (entry) check(entry.sql);
-          return target.batch(entries.map((entry, i) => entry?.real ?? statements[i]!));
+          return target.batch(
+            entries.map((entry, i) =>
+              entry && insideBatch?.(normalizeSql(entry.sql), i)
+                ? target.prepare(MALFORMED_AT_RUN)
+                : (entry?.real ?? statements[i]!),
+            ),
+          );
         };
       }
       if (prop === "exec") {
@@ -105,9 +123,13 @@ export function failingDb(real: D1Database): FailingDb {
     failWhen: (next) => {
       predicate = next;
     },
+    failInsideBatch: (next) => {
+      insideBatch = next;
+    },
     heal: () => {
       all = false;
       predicate = null;
+      insideBatch = null;
     },
   };
 }

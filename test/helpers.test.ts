@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { Bot } from "grammy";
+import { Bot, GrammyError } from "grammy";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BOT_INFO, BOT_TOKEN, BOT_USERNAME, SECRET_HEADER, WEBHOOK_SECRET } from "./helpers/constants";
 import { failingDb, normalizeSql, useCleanTables } from "./helpers/db";
@@ -11,6 +11,8 @@ import {
   editedMessageUpdate,
   messageUpdate,
   photoUpdate,
+  stickerUpdate,
+  voiceUpdate,
 } from "./helpers/updates";
 import type { BotContext } from "../src/gateway/registry";
 
@@ -109,6 +111,48 @@ describe("update builders and the fetch stub", () => {
     expect(telegram.callsTo("getChat")).toEqual([{ method: "getChat", payload: { chat_id: 5 } }]);
   });
 
+  it("builds a sticker and a voice note with no text", () => {
+    const sticker = stickerUpdate({ updateId: 3, messageId: 30 });
+    expect(sticker.update_id).toBe(3);
+    expect(sticker.message?.message_id).toBe(30);
+    expect(sticker.message?.sticker?.file_id).toBe("sticker-1");
+    expect(sticker.message?.text).toBeUndefined();
+    expect(sticker.message && "text" in sticker.message).toBe(false);
+    const voice = voiceUpdate();
+    expect(voice.message?.voice?.file_id).toBe("voice-1");
+    expect(voice.message?.text).toBeUndefined();
+    expect(voice.message && "text" in voice.message).toBe(false);
+  });
+
+  it("failNext fails exactly one call with a GrammyError, then answers normally", async () => {
+    telegram.setResult("sendMessage", { message_id: 900 });
+    telegram.failNext("sendMessage");
+    const bot = new Bot(BOT_TOKEN, { botInfo: BOT_INFO });
+    const failure = await bot.api.sendMessage(5, "one").then(
+      () => null,
+      (error: unknown) => error,
+    );
+    expect(failure).toBeInstanceOf(GrammyError);
+    expect((failure as GrammyError).error_code).toBe(500);
+    expect((failure as GrammyError).description).toBe("Internal Server Error: injected");
+    expect(await bot.api.sendMessage(5, "two")).toEqual({ message_id: 900 });
+    expect(telegram.callsTo("sendMessage")).toEqual([
+      { method: "sendMessage", payload: { chat_id: 5, text: "one" }, failed: true },
+      { method: "sendMessage", payload: { chat_id: 5, text: "two" } },
+    ]);
+  });
+
+  it("failNext answers with a chosen error code and description", async () => {
+    telegram.failNext("sendMessage", { error_code: 400, description: "Bad Request: message to be replied not found" });
+    const bot = new Bot(BOT_TOKEN, { botInfo: BOT_INFO });
+    await expect(bot.api.sendMessage(5, "one")).rejects.toMatchObject({
+      error_code: 400,
+      description: "Bad Request: message to be replied not found",
+    });
+    await expect(bot.api.getChat(5)).resolves.toBe(true);
+    expect(telegram.calls.map((call) => call.failed ?? false)).toEqual([true, false]);
+  });
+
   it("restores fetch", () => {
     const stubbed = globalThis.fetch;
     telegram.restore();
@@ -193,6 +237,50 @@ describe("failing database proxy", () => {
     proxy.failAll();
     proxy.heal();
     await expect(proxy.db.prepare("SELECT 1").first()).resolves.toEqual({ "1": 1 });
+  });
+
+  const settingsKeys = async (): Promise<string[]> =>
+    (await env.DB.prepare("SELECT key FROM settings ORDER BY key").all<{ key: string }>()).results.map(
+      (row) => row.key,
+    );
+
+  it("D1 rolls back a whole batch when a later statement fails", async () => {
+    await expect(
+      env.DB.batch([env.DB.prepare(insert).bind("x"), env.DB.prepare(insert).bind("x")]),
+    ).rejects.toThrow(/UNIQUE constraint failed: settings\.key/);
+    expect(await settingsKeys()).toEqual([]);
+  });
+
+  it("failInsideBatch at position 1 rejects the batch and leaves no trace of position 0", async () => {
+    const proxy = failingDb(env.DB);
+    const seen: [string, number][] = [];
+    proxy.failInsideBatch((sql, position) => {
+      seen.push([sql, position]);
+      return position === 1;
+    });
+    await expect(
+      proxy.db.batch([proxy.db.prepare(insert).bind("a"), proxy.db.prepare(insert).bind("b")]),
+    ).rejects.toThrow(/malformed JSON/);
+    expect(await settingsKeys()).toEqual([]);
+    expect(seen).toEqual([
+      [insert, 0],
+      [insert, 1],
+    ]);
+  });
+
+  it("failInsideBatch leaves statements outside a batch alone", async () => {
+    const proxy = failingDb(env.DB);
+    proxy.failInsideBatch(() => true);
+    await proxy.db.prepare(insert).bind("a").run();
+    expect(await settingsKeys()).toEqual(["a"]);
+  });
+
+  it("heal clears failInsideBatch", async () => {
+    const proxy = failingDb(env.DB);
+    proxy.failInsideBatch((_sql, position) => position === 1);
+    proxy.heal();
+    await proxy.db.batch([proxy.db.prepare(insert).bind("a"), proxy.db.prepare(insert).bind("b")]);
+    expect(await settingsKeys()).toEqual(["a", "b"]);
   });
 });
 
