@@ -15,3 +15,8 @@ const config = JSON.parse(
 test("the Worker has exactly one cron trigger, at the start of every hour", () => {
   assert.deepEqual(config.triggers?.crons, ["0 * * * *"]);
 });
+
+test("the nudge is enabled and set to 21:00", () => {
+  assert.equal(config.vars?.NUDGE_ENABLED, "true");
+  assert.equal(config.vars?.NUDGE_HOUR, "21");
+});

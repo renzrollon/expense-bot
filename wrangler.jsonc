@@ -16,7 +16,9 @@
   "vars": {
     "BOT_INFO": "{}",
     "ALLOWED_USER_IDS": "[]",
-    "HOUSEHOLD_TZ": "Asia/Manila"
+    "HOUSEHOLD_TZ": "Asia/Manila",
+    "NUDGE_ENABLED": "true",
+    "NUDGE_HOUR": "21"
   },
   "secrets": {
     "required": ["BOT_TOKEN", "WEBHOOK_SECRET"]

@@ -6,14 +6,24 @@ import { core } from "../src/core";
 import { buildRegistry } from "../src/gateway/registry";
 import worker from "../src/index";
 import { modules } from "../src/modules";
+import { EXPORT_DESCRIPTION } from "../src/export/command";
 import { ALLOWED_CHAT_ID } from "./helpers/constants";
 import { useCleanTables } from "./helpers/db";
 import { signedRequest } from "./helpers/requests";
 import { tick } from "./helpers/scheduler";
 import { installTelegramStub, type TelegramStub } from "./helpers/telegram";
-import { messageUpdate } from "./helpers/updates";
+import { callbackUpdate, messageUpdate } from "./helpers/updates";
 
-const HELP_LINES = ["Commands", "/ping · bot status", "/help · this list"];
+const HELP_LINES = [
+  "Commands",
+  "/ping · bot status",
+  "/help · this list",
+  "/today · spending today",
+  "/week · spending this week",
+  "/month · spending this month",
+  "/undo · remove your last entry",
+  "/export · " + EXPORT_DESCRIPTION,
+];
 const CONFIRMATION_ID = 900;
 
 useCleanTables(env.DB);
@@ -105,20 +115,71 @@ describe("The system SHALL run the scheduler from one hourly trigger", () => {
     expect(typeof worker.scheduled).toBe("function");
   });
 
-  it("A tick with no job registered completes and writes no run record", async () => {
-    await expect(tick({ scheduled: worker.scheduled }, "2026-09-30T13:00:00Z")).resolves.toBeUndefined();
-
-    const runs = await env.DB.prepare("SELECT COUNT(*) AS count FROM job_runs").first<{ count: number }>();
-    expect(runs?.count).toBe(0);
-  });
-
-  it("/ping on the deployed bot shows that no job is registered", async () => {
+  it("/ping on the deployed bot lists the four jobs in order", async () => {
     const response = await sendToDeployedBot("/ping", 4, 58);
 
     expect(response.status).toBe(200);
     const sends = telegram.callsTo("sendMessage");
     expect(sends).toHaveLength(1);
     const payload = sends[0]?.payload as { text: string };
-    expect(payload.text.split("\n")).toContain("Jobs: none registered");
+    const jobs = payload.text
+      .split("\n")
+      .filter((line) => line.startsWith("Job "))
+      .map((line) => line.slice(4).split(":")[0]);
+    expect(jobs).toEqual(["weekly_digest", "monthly_recap", "evening_nudge", "nightly_backup"]);
+  });
+
+  it("A tick at 21:00 Manila sends the nudge to the allowed chat", async () => {
+    await expect(tick({ scheduled: worker.scheduled }, "2026-09-30T13:00:00Z")).resolves.toBeUndefined();
+
+    const nudges = telegram
+      .callsTo("sendMessage")
+      .map((call) => call.payload as { chat_id: number; text: string })
+      .filter((payload) => payload.text.startsWith("🌙 Nothing logged"));
+    expect(nudges).toHaveLength(1);
+    expect(nudges[0]?.chat_id).toBe(ALLOWED_CHAT_ID);
+  });
+});
+
+describe("The system SHALL make corrections available in the deployed bot", () => {
+  it("Happy path — the command is listed", async () => {
+    await sendToDeployedBot("/help", 5, 59);
+
+    const payload = telegram.callsTo("sendMessage")[0]?.payload as { text: string };
+    expect(payload.text.split("\n")).toContain("/undo · remove your last entry");
+  });
+
+  it("Failure — a prefix that corrections does not own", async () => {
+    const ctx = createExecutionContext();
+    const response = await worker.fetch(
+      signedRequest(callbackUpdate({ data: "x:7", updateId: 6, messageId: 60 })),
+      env,
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+
+    expect(response.status).toBe(200);
+    const answers = telegram.callsTo("answerCallbackQuery").map((call) => (call.payload as { text?: string }).text);
+    expect(answers).toEqual(["This button no longer works."]);
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM expenses").first<{ count: number }>();
+    expect(count?.count).toBe(0);
+  });
+
+  it("Edge case — a new message is not handled by corrections", async () => {
+    telegram.setResult("sendMessage", {
+      message_id: CONFIRMATION_ID,
+      date: 1_780_000_000,
+      chat: { id: ALLOWED_CHAT_ID, type: "supergroup" },
+      text: "",
+    });
+
+    await sendToDeployedBot("coffee 80", 7, 61);
+
+    const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM expenses").first<{ count: number }>();
+    expect(count?.count).toBe(1);
+    expect(telegram.callsTo("sendMessage").filter((call) => !call.failed)).toHaveLength(1);
+    const registry = buildRegistry(modules);
+    expect(registry.messages.filter((entry) => entry.module === "corrections")).toEqual([]);
+    expect(registry.jobs.filter((entry) => entry.module === "corrections")).toEqual([]);
   });
 });

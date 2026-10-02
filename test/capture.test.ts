@@ -59,6 +59,7 @@ interface SendPayload {
   parse_mode?: unknown;
   reply_parameters?: { message_id?: unknown; allow_sending_without_reply?: unknown };
   link_preview_options?: unknown;
+  reply_markup?: { inline_keyboard?: unknown };
 }
 
 useCleanTables(env.DB);
@@ -152,6 +153,17 @@ function onlyReply(messageId = MESSAGE_ID): string {
   return payload.text;
 }
 
+/** The buttons of the one accepted reply. */
+function onlyReplyButtons(): unknown {
+  const calls = sent();
+  expect(calls).toHaveLength(1);
+  return payloadOf(calls[0]).reply_markup?.inline_keyboard;
+}
+
+function button(text: string, data: string) {
+  return { text, callback_data: data };
+}
+
 async function rows(): Promise<ExpenseRow[]> {
   const result = await env.DB.prepare("SELECT * FROM expenses ORDER BY source_message_id, item_index").all<ExpenseRow>();
   return result.results;
@@ -212,6 +224,18 @@ describe("Which messages are captured", () => {
 });
 
 describe("The message is read at the time it was sent", () => {
+  it("Happy path — handled seconds after it was sent", async () => {
+    now = new Date("2026-09-29T02:00:03.000Z");
+
+    const response = await deliver(textUpdate("lunch 250", { sentAt: SENT }));
+
+    expect(response.status).toBe(200);
+    const stored = await rows();
+    expect(stored).toHaveLength(1);
+    expect(stored[0]?.spent_on).toBe("2026-09-29");
+    expect(onlyReply()).toBe("✅ ₱250 · 🍽 Dining · Ana · today");
+  });
+
   it("A late attempt keeps the send date", async () => {
     const sentAt = new Date("2026-09-29T15:59:00.000Z");
     now = new Date("2026-09-29T16:00:05.000Z");
@@ -222,7 +246,18 @@ describe("The message is read at the time it was sent", () => {
     const stored = await rows();
     expect(stored).toHaveLength(1);
     expect(stored[0]?.spent_on).toBe("2026-09-29");
-    expect(onlyReply()).toBe("✅ ₱250 · 🍽 Dining · Ana · today");
+    expect(onlyReply()).toBe("✅ ₱250 · 🍽 Dining · Ana · yesterday");
+  });
+
+  it("Failure — a date that was in the future when the message was sent", async () => {
+    const sentAt = new Date("2026-09-29T15:59:00.000Z");
+    now = new Date("2026-09-29T16:00:05.000Z");
+
+    const response = await deliver(textUpdate("sep 30 lunch 250", { sentAt }));
+
+    expect(response.status).toBe(200);
+    expect(await rows()).toEqual([]);
+    expect(onlyReply()).toBe("❌ Not logged: the date is in the future.");
   });
 });
 
@@ -390,6 +425,8 @@ describe("One confirmation per message", () => {
     const stored = await rows();
     expect(stored).toHaveLength(1);
     expect(stored[0]?.confirmation_message_id).toBe(CONFIRMATION_ID);
+    const id = stored[0]?.id;
+    expect(onlyReplyButtons()).toEqual([[button("Category", `c:${id}`), button("Undo", `u:${id}`)]]);
   });
 
   it("Several expenses are confirmed together", async () => {
@@ -405,6 +442,11 @@ describe("One confirmation per message", () => {
     );
     const stored = await rows();
     expect(stored.map((row) => row.confirmation_message_id)).toEqual([CONFIRMATION_ID, CONFIRMATION_ID]);
+    const [first, second] = stored.map((row) => row.id);
+    expect(onlyReplyButtons()).toEqual([
+      [button("1 · Category", `c:${first}`), button("1 · Undo", `u:${first}`)],
+      [button("2 · Category", `c:${second}`), button("2 · Undo", `u:${second}`)],
+    ]);
   });
 
   it("Centavos are shown when they are not zero", async () => {
@@ -483,6 +525,14 @@ describe("One confirmation per message", () => {
     expect(onlyReply()).toBe(
       ["✅ 2 entries · ₱330 · Ana · today", "1. ₱250 · ❓ Other", "2. ₱80 · 🍽 Dining · coffee"].join("\n"),
     );
+  });
+
+  it("A rejection carries no buttons", async () => {
+    const response = await sendText("oct 15 rent 12000");
+
+    expect(response.status).toBe(200);
+    expect(onlyReply()).toBe("❌ Not logged: the date is in the future.");
+    expect(payloadOf(sent()[0])).not.toHaveProperty("reply_markup");
   });
 });
 

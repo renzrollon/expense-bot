@@ -1,11 +1,8 @@
 import { getCategory } from "../categories";
-import type { Entry } from "../ledger";
 import type { RejectionReason } from "../parser";
 import { shiftDate } from "../parser/dates";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-const SEPARATOR = " · ";
-const CHECK_AMOUNT = "⚠️ check amount";
 /** A description longer than this many code points is cut (D53). */
 const DESCRIPTION_MAX = 60;
 
@@ -33,36 +30,9 @@ export function categoryLabel(categoryId: string): string {
 }
 
 /** The description, cut to 59 code points and `…` when it is longer than 60 (D53). */
-function shorten(description: string): string {
+export function shorten(description: string): string {
   const points = Array.from(description);
   return points.length > DESCRIPTION_MAX ? `${points.slice(0, DESCRIPTION_MAX - 1).join("")}…` : description;
-}
-
-function withCheck(parts: string[], entry: Entry): string {
-  return (entry.checkAmount ? [...parts, CHECK_AMOUNT] : parts).join(SEPARATOR);
-}
-
-/** The confirmation of one message's stored entries, in plain text (design Decision 12). */
-export function confirmationText(entries: readonly Entry[], payerName: string, sentOn: string): string {
-  const first = entries[0];
-  if (first === undefined) return "";
-  const date = dateLabel(first.spentOn, sentOn);
-
-  if (entries.length === 1) {
-    return withCheck(
-      [`✅ ${formatPesos(first.amountCentavos)}`, categoryLabel(first.categoryId), payerName, date],
-      first,
-    );
-  }
-
-  const total = entries.reduce((sum, entry) => sum + entry.amountCentavos, 0);
-  const header = [`✅ ${entries.length} entries`, formatPesos(total), payerName, date].join(SEPARATOR);
-  const lines = entries.map((entry, i) => {
-    const parts = [`${i + 1}. ${formatPesos(entry.amountCentavos)}`, categoryLabel(entry.categoryId)];
-    if (entry.description !== "") parts.push(shorten(entry.description));
-    return withCheck(parts, entry);
-  });
-  return [header, ...lines].join("\n");
 }
 
 /** The reply to a rejected message (design Decision 13). */

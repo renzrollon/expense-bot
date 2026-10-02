@@ -1,8 +1,10 @@
 export { CATEGORIES } from "./categories";
 export type { Category } from "./categories";
 export { SEED_KEYWORDS } from "./keywords";
-export { FALLBACK_CATEGORY_ID, getCategory, isCategoryId } from "./lookup";
+export { countsAsSpending, FALLBACK_CATEGORY_ID, getCategory, isCategoryId, NOT_COUNTED_IDS } from "./lookup";
+export { learnableKeyword } from "./learn";
 export { normalizeKeyword, normalizeWords } from "./normalize";
 export { createMatcher } from "./match";
 export type { CategoryMatch, LearnedKeyword, LearnedSource, Matcher, MatchSource } from "./match";
-export { listKeywords } from "./store";
+export { listKeywordRows, listKeywords, teachKeyword } from "./store";
+export type { KeywordRow, TeachKeywordInput } from "./store";

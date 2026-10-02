@@ -1,11 +1,11 @@
 import { env } from "cloudflare:workers";
-import { Bot, GrammyError } from "grammy";
+import { Api, Bot, GrammyError, InputFile } from "grammy";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { BOT_INFO, BOT_TOKEN, BOT_USERNAME, SECRET_HEADER, WEBHOOK_SECRET } from "./helpers/constants";
 import { failingDb, normalizeSql, useCleanTables } from "./helpers/db";
 import { probeModule } from "./helpers/probe";
 import { signedRequest } from "./helpers/requests";
-import { installTelegramStub, type TelegramStub } from "./helpers/telegram";
+import { installTelegramStub, type MultipartPayload, type TelegramStub } from "./helpers/telegram";
 import {
   callbackUpdate,
   editedMessageUpdate,
@@ -151,6 +151,26 @@ describe("update builders and the fetch stub", () => {
     });
     await expect(bot.api.getChat(5)).resolves.toBe(true);
     expect(telegram.calls.map((call) => call.failed ?? false)).toEqual([true, false]);
+  });
+
+  it("reads an uploaded document: its fields, its file name and its exact text", async () => {
+    const text = "date,amount,description\r\n2026-09-29,250.00,\"Açaí, bowl 🍧\"\r\n";
+    const api = new Api(BOT_TOKEN);
+    await api.sendDocument(5, new InputFile(new TextEncoder().encode(text), "expenses-2026-09.csv"), {
+      caption: "September 2026",
+    });
+    const calls = telegram.callsTo("sendDocument");
+    expect(calls).toHaveLength(1);
+    const payload = calls[0]!.payload as MultipartPayload;
+    expect(payload.files).toHaveLength(1);
+    const file = payload.files[0]!;
+    expect(file.fileName).toBe("expenses-2026-09.csv");
+    expect(file.text).toBe(text);
+    expect(payload.fields).toEqual({
+      chat_id: "5",
+      document: `attach://${file.field}`,
+      caption: "September 2026",
+    });
   });
 
   it("restores fetch", () => {

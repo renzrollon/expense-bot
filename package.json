@@ -8,6 +8,7 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "setup": "node scripts/setup.mjs",
+    "restore": "node scripts/restore.mjs",
     "db:migrate:local": "wrangler d1 migrations apply expense-bot --local",
     "db:migrate:remote": "wrangler d1 migrations apply expense-bot --remote"
   },

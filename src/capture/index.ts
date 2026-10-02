@@ -1,9 +1,10 @@
 import { createMatcher, listKeywords } from "../categories";
+import type { InlineKeyboardButton } from "grammy/types";
 import type { BotContext, FeatureModule } from "../gateway/registry";
 import { addMessageEntries, attachConfirmation, type NewEntryItem } from "../ledger";
 import { parseExpenseMessage } from "../parser";
-import { localDate } from "../parser/dates";
-import { confirmationText, rejectionText } from "./format";
+import { renderConfirmation } from "./confirmation";
+import { rejectionText } from "./format";
 
 /**
  * Turns a member's text message into ledger entries and one confirmation, as the
@@ -59,9 +60,9 @@ export async function handleCapture(ctx: BotContext): Promise<void> {
   // 7. Already confirmed by an earlier attempt (D36).
   if (entries.some((entry) => entry.confirmationMessageId !== null)) return;
 
-  // 8. Confirm from the stored entries (D41).
-  const sentOn = localDate(sentAt, timezone);
-  const sent = await reply(ctx, message.message_id, confirmationText(entries, member.displayName, sentOn));
+  // 8. Confirm from the stored entries (D41), with the correction buttons (Decision 5).
+  const view = renderConfirmation(entries, member.displayName, timezone);
+  const sent = await reply(ctx, message.message_id, view.text, view.keyboard);
 
   // 9. Save the reply's id. A failure is logged and swallowed (D37).
   try {
@@ -80,12 +81,14 @@ export async function handleCapture(ctx: BotContext): Promise<void> {
 
 /**
  * One plain-text reply to the member's message, still sent when that message was
- * deleted (D52), with link previews off (D38, D49).
+ * deleted (D52), with link previews off (D38, D49). Buttons are attached only when
+ * given, so a rejection carries none.
  */
-async function reply(ctx: BotContext, messageId: number, text: string) {
+async function reply(ctx: BotContext, messageId: number, text: string, keyboard?: InlineKeyboardButton[][]) {
   return ctx.reply(text, {
     reply_parameters: { message_id: messageId, allow_sending_without_reply: true },
     link_preview_options: { is_disabled: true },
+    ...(keyboard === undefined ? {} : { reply_markup: { inline_keyboard: keyboard } }),
   });
 }
 

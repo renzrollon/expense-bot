@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   CATEGORIES,
   FALLBACK_CATEGORY_ID,
+  NOT_COUNTED_IDS,
   SEED_KEYWORDS,
+  countsAsSpending,
   createMatcher,
   getCategory,
   isCategoryId,
@@ -64,6 +66,21 @@ describe("Category list", () => {
     expect(new Set(orders).size).toBe(orders.length);
     expect(ids).toContain("other");
     expect(FALLBACK_CATEGORY_ID).toBe("other");
+  });
+});
+
+describe("Counts as spending", () => {
+  it.each<[string, boolean]>([
+    ["transfer", false],
+    ...DEFAULT_LIST.filter((c) => c.id !== "transfer").map((c): [string, boolean] => [c.id, true]),
+    ["snacks", true],
+    ["", true],
+  ])("countsAsSpending(%j) is %s", (id, expected) => {
+    expect(countsAsSpending(id)).toBe(expected);
+  });
+
+  it("NOT_COUNTED_IDS holds transfer only", () => {
+    expect(NOT_COUNTED_IDS).toEqual(["transfer"]);
   });
 });
 

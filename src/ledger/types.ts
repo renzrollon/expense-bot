@@ -49,6 +49,8 @@ export interface Entry {
   updatedBy: number;
   deletedAt: string | null;
   deletedBy: number | null;
+  /** When the source message was edited after it was logged; null until it is marked. */
+  sourceEditedAt: string | null;
 }
 
 /** The result of `addMessageEntries`: `created` is false when the message was already stored. */
@@ -87,4 +89,20 @@ export interface CategoryTotal {
   categoryId: string;
   totalCentavos: number;
   count: number;
+}
+
+/** Options of `largestEntries`. */
+export interface LargestOptions {
+  /** A whole number from 1 to 50. */
+  limit: number;
+  /** Category ids whose entries are left out. */
+  excludeCategoryIds?: readonly string[];
+}
+
+/** The window of `listBackupEntries`: dated on or after `datedFrom`, or changed at or after `changedSince`. */
+export interface BackupWindow {
+  /** YYYY-MM-DD. */
+  datedFrom: string;
+  /** ISO-8601 UTC time. */
+  changedSince: string;
 }

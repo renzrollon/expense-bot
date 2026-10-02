@@ -1,11 +1,13 @@
 import type {
   AddResult,
+  BackupWindow,
   CategoryChange,
   CategorySource,
   CategoryTotal,
   ChangeResult,
   Entry,
   EntryChange,
+  LargestOptions,
   NewMessageEntries,
   ParserKind,
   Period,
@@ -13,12 +15,14 @@ import type {
 
 export type {
   AddResult,
+  BackupWindow,
   CategoryChange,
   CategorySource,
   CategoryTotal,
   ChangeResult,
   Entry,
   EntryChange,
+  LargestOptions,
   NewEntryItem,
   NewMessageEntries,
   ParserKind,
@@ -37,6 +41,8 @@ export const CURRENCY = "PHP";
 const CATEGORY_SOURCES: readonly CategorySource[] = ["keyword", "learned", "llm", "manual", "default"];
 const PARSERS: readonly ParserKind[] = ["rules", "llm"];
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+/** The largest limit `largestEntries` accepts. */
+export const MAX_LARGEST_LIMIT = 50;
 
 /** One `expenses` row, as D1 returns it (design Decision 2). */
 interface ExpenseRow {
@@ -61,6 +67,7 @@ interface ExpenseRow {
   updated_by: number;
   deleted_at: string | null;
   deleted_by: number | null;
+  source_edited_at: string | null;
 }
 
 /** Maps a snake_case row to the camelCase `Entry` (design Decision 3). */
@@ -87,6 +94,7 @@ function toEntry(row: ExpenseRow): Entry {
     updatedBy: row.updated_by,
     deletedAt: row.deleted_at,
     deletedBy: row.deleted_by,
+    sourceEditedAt: row.source_edited_at,
   };
 }
 
@@ -307,4 +315,95 @@ export async function countActiveEntriesOn(db: D1Database, spentOn: string): Pro
     .bind(spentOn)
     .first<{ count: number }>();
   return row?.count ?? 0;
+}
+
+/** The entry with this id, active or removed. A value that is not a positive whole number gives null, with no statement. */
+export async function getEntry(db: D1Database, id: number): Promise<Entry | null> {
+  if (!Number.isSafeInteger(id) || id < 1) return null;
+  const row = await db.prepare("SELECT * FROM expenses WHERE id = ?").bind(id).first<ExpenseRow>();
+  return row ? toEntry(row) : null;
+}
+
+/**
+ * Sets the edit time on every entry of the message that has none, removed ones
+ * included, and returns the message's entries in item order (Decision 4).
+ * The time and author of the last change are left as they were.
+ */
+export async function markSourceEdited(
+  db: D1Database,
+  chatId: number,
+  sourceMessageId: number,
+  now: Date,
+): Promise<Entry[]> {
+  const results = await db.batch<ExpenseRow>([
+    db
+      .prepare(
+        `UPDATE expenses SET source_edited_at = ?1
+         WHERE chat_id = ?2 AND source_message_id = ?3 AND source_edited_at IS NULL`,
+      )
+      .bind(now.toISOString(), chatId, sourceMessageId),
+    db.prepare(SELECT_MESSAGE).bind(chatId, sourceMessageId),
+  ]);
+  return (results.at(-1)?.results ?? []).map(toEntry);
+}
+
+/** The active entries of the period with the largest amounts, at most `limit` (Decision 4). */
+export async function largestEntries(db: D1Database, period: Period, options: LargestOptions): Promise<Entry[]> {
+  checkPeriod(period);
+  const { limit } = options;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_LARGEST_LIMIT) {
+    throw new RangeError(`limit must be a whole number from 1 to ${MAX_LARGEST_LIMIT}`);
+  }
+  const excluded = [...(options.excludeCategoryIds ?? [])];
+  const notIn = excluded.length > 0 ? ` AND category_id NOT IN (${excluded.map(() => "?").join(", ")})` : "";
+  const { results } = await db
+    .prepare(
+      `SELECT * FROM expenses
+       WHERE deleted_at IS NULL AND spent_on BETWEEN ? AND ?${notIn}
+       ORDER BY amount_centavos DESC, spent_on, id LIMIT ?`,
+    )
+    .bind(period.from, period.to, ...excluded, limit)
+    .all<ExpenseRow>();
+  return results.map(toEntry);
+}
+
+/** The number of distinct spent-on dates in the period with at least one active entry. */
+export async function countDaysWithEntries(db: D1Database, period: Period): Promise<number> {
+  checkPeriod(period);
+  const row = await db
+    .prepare(
+      `SELECT COUNT(DISTINCT spent_on) AS count FROM expenses
+       WHERE deleted_at IS NULL AND spent_on BETWEEN ? AND ?`,
+    )
+    .bind(period.from, period.to)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+}
+
+/**
+ * Every entry, removed ones included, dated on or after `datedFrom` or last
+ * changed at or after `changedSince`, in id order (Decision 4, Decision 16).
+ */
+export async function listBackupEntries(db: D1Database, window: BackupWindow): Promise<Entry[]> {
+  checkDate("datedFrom", window.datedFrom);
+  if (typeof window.changedSince !== "string" || window.changedSince === "") {
+    throw new RangeError("changedSince must be an ISO-8601 time");
+  }
+  const { results } = await db
+    .prepare("SELECT * FROM expenses WHERE spent_on >= ?1 OR updated_at >= ?2 ORDER BY id")
+    .bind(window.datedFrom, window.changedSince)
+    .all<ExpenseRow>();
+  return results.map(toEntry);
+}
+
+/** The removed entry whose remover is `byUserId` and whose removal time is exactly `at`, highest id first (Decision 8). */
+export async function findRemovalAt(db: D1Database, byUserId: number, at: Date): Promise<Entry | null> {
+  const row = await db
+    .prepare(
+      `SELECT * FROM expenses WHERE deleted_by = ?1 AND deleted_at = ?2
+       ORDER BY id DESC LIMIT 1`,
+    )
+    .bind(byUserId, at.toISOString())
+    .first<ExpenseRow>();
+  return row ? toEntry(row) : null;
 }

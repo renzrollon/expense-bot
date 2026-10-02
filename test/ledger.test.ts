@@ -204,6 +204,7 @@ describe("Entry record", () => {
       updatedBy: ANA,
       deletedAt: null,
       deletedBy: null,
+      sourceEditedAt: null,
     });
     expect(await rowsOf(CHAT, 10)).toEqual([
       {
@@ -228,6 +229,7 @@ describe("Entry record", () => {
         updated_by: ANA,
         deleted_at: null,
         deleted_by: null,
+        source_edited_at: null,
       },
     ]);
   });

@@ -72,13 +72,16 @@ The step lists each chat as `<id>  <type>  <title>` and each sender as `<id>  <f
 
 ## Set the secrets and settings
 
-1. Set the three settings under `vars` in `wrangler.jsonc`:
+1. Set the settings under `vars` in `wrangler.jsonc`. The first three are required. The last three are optional:
 
    | Setting | Value |
    |---|---|
    | `BOT_INFO` | The JSON line from `bot-info`, written as a JSON string |
    | `ALLOWED_USER_IDS` | The members' user ids from `discover`, as a JSON list such as `"[1001, 1002]"` |
    | `HOUSEHOLD_TZ` | The household's timezone name, such as `Asia/Manila` |
+   | `NUDGE_ENABLED` | Optional. `true` or `false`. Turns the evening nudge on or off. Default `true` |
+   | `NUDGE_HOUR` | Optional. The hour of the evening nudge in household time, a whole number from 0 to 23. Default `21` |
+   | `BACKUP_CHAT_ID` | Optional. The chat that receives the nightly backup files. Default: the household group |
 
    These values are committed with the repository. User ids and the bot's identity are not secrets, but anyone who can read the repository sees them. Keep that in mind before you make the repository public.
 
@@ -117,7 +120,7 @@ npm run deploy
 
 Wrangler prints the Worker's address, such as `https://expense-bot.<your-subdomain>.workers.dev`. The webhook address is that address followed by `/webhook`.
 
-Deploying also registers the hourly cron trigger that runs scheduled jobs. If a deploy adds a database migration, run `npm run db:migrate:remote` before `npm run deploy`. After a deploy, `/ping` shows each job's last run.
+Deploying also registers the hourly cron trigger that runs scheduled jobs. If a deploy adds a database migration, run `npm run db:migrate:remote` before `npm run deploy`. After a deploy, `/ping` shows each job's last run. The nightly backup files, and how to restore from them, are described in [Backup and restore](backup-restore.md).
 
 ## Register and verify the webhook
 

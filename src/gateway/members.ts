@@ -33,3 +33,11 @@ export async function getMember(db: D1Database, userId: number): Promise<Member 
     .first<{ user_id: number; display_name: string }>();
   return row ? { userId: row.user_id, displayName: row.display_name } : null;
 }
+
+/** Every member record, ordered by user id. */
+export async function listMembers(db: D1Database): Promise<Member[]> {
+  const { results } = await db
+    .prepare("SELECT user_id, display_name FROM members ORDER BY user_id")
+    .all<{ user_id: number; display_name: string }>();
+  return results.map((row) => ({ userId: row.user_id, displayName: row.display_name }));
+}

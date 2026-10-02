@@ -2,6 +2,7 @@ import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test"
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createGateway } from "../src/gateway";
+import { listMembers } from "../src/gateway/members";
 import type { BotContext, FeatureModule } from "../src/gateway/registry";
 import { ALLOWED_CHAT_ID, MEMBER_A, MEMBER_B } from "./helpers/constants";
 import { useCleanTables } from "./helpers/db";
@@ -136,5 +137,16 @@ describe("Member records", () => {
     expect(await memberRow(NON_MEMBER_ID)).toEqual(before);
     const updates = await env.DB.prepare("SELECT COUNT(*) AS n FROM updates").first<{ n: number }>();
     expect(updates?.n).toBe(0);
+  });
+});
+
+describe("listMembers", () => {
+  it("reads every member, ordered by user id", async () => {
+    await insertMember(MEMBER_B.id, MEMBER_B.firstName, MEMBER_B.username);
+    await insertMember(MEMBER_A.id, MEMBER_A.firstName, MEMBER_A.username);
+    expect(await listMembers(env.DB)).toEqual([
+      { userId: MEMBER_A.id, displayName: MEMBER_A.firstName },
+      { userId: MEMBER_B.id, displayName: MEMBER_B.firstName },
+    ]);
   });
 });

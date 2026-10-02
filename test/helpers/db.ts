@@ -1,6 +1,15 @@
 import { beforeEach } from "vitest";
 
-export const TABLES = ["updates", "members", "settings", "expenses", "keyword_map", "job_runs"] as const;
+export const TABLES = [
+  "updates",
+  "members",
+  "settings",
+  "expenses",
+  "keyword_map",
+  "job_runs",
+  "day_marks",
+  "job_sends",
+] as const;
 
 /** Empties every table in TABLES. */
 export async function resetTables(db: D1Database): Promise<void> {
