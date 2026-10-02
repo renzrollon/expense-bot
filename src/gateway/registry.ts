@@ -41,6 +41,12 @@ export interface JobContext {
   timezone: string;
   chatId: number;
   api: Api;
+  /**
+   * The local date (YYYY-MM-DD, household timezone) of the slot this run belongs to.
+   * Decide the day, week or month a job covers from this, never from `now`:
+   * a run up to 3 hours late still belongs to its scheduled date.
+   */
+  scheduledDate: string;
 }
 
 export type BotContext = Context & {

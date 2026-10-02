@@ -117,6 +117,8 @@ npm run deploy
 
 Wrangler prints the Worker's address, such as `https://expense-bot.<your-subdomain>.workers.dev`. The webhook address is that address followed by `/webhook`.
 
+Deploying also registers the hourly cron trigger that runs scheduled jobs. If a deploy adds a database migration, run `npm run db:migrate:remote` before `npm run deploy`. After a deploy, `/ping` shows each job's last run.
+
 ## Register and verify the webhook
 
 1. Register the webhook. For the first registration, add `--drop-pending`:

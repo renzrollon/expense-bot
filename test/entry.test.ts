@@ -9,6 +9,7 @@ import { modules } from "../src/modules";
 import { ALLOWED_CHAT_ID } from "./helpers/constants";
 import { useCleanTables } from "./helpers/db";
 import { signedRequest } from "./helpers/requests";
+import { tick } from "./helpers/scheduler";
 import { installTelegramStub, type TelegramStub } from "./helpers/telegram";
 import { messageUpdate } from "./helpers/updates";
 
@@ -96,5 +97,28 @@ describe("Capture is registered", () => {
     expect(registry.callbacks.filter((entry) => entry.module === "capture")).toEqual([]);
     expect(registry.editedMessages.filter((entry) => entry.module === "capture")).toEqual([]);
     expect(registry.jobs.filter((entry) => entry.module === "capture")).toEqual([]);
+  });
+});
+
+describe("The system SHALL run the scheduler from one hourly trigger", () => {
+  it("The deployed entry exports a scheduled handler", () => {
+    expect(typeof worker.scheduled).toBe("function");
+  });
+
+  it("A tick with no job registered completes and writes no run record", async () => {
+    await expect(tick({ scheduled: worker.scheduled }, "2026-09-30T13:00:00Z")).resolves.toBeUndefined();
+
+    const runs = await env.DB.prepare("SELECT COUNT(*) AS count FROM job_runs").first<{ count: number }>();
+    expect(runs?.count).toBe(0);
+  });
+
+  it("/ping on the deployed bot shows that no job is registered", async () => {
+    const response = await sendToDeployedBot("/ping", 4, 58);
+
+    expect(response.status).toBe(200);
+    const sends = telegram.callsTo("sendMessage");
+    expect(sends).toHaveLength(1);
+    const payload = sends[0]?.payload as { text: string };
+    expect(payload.text.split("\n")).toContain("Jobs: none registered");
   });
 });
