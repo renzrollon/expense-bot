@@ -6,6 +6,7 @@
       "Bash(openspec:*)",
       "Bash(git:*)",
       "Bash(npm test:*)",
+      "Bash(npx vitest run:*)",
       "Bash(node --test:*)",
       "Bash(test:*)",
       "Bash(printenv:*)",
