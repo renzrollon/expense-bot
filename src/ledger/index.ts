@@ -307,6 +307,16 @@ export async function listEntries(
   return results.map(toEntry);
 }
 
+/** The number of active entries dated in the period, both end dates included. */
+export async function countActiveEntries(db: D1Database, period: Period): Promise<number> {
+  checkPeriod(period);
+  const row = await db
+    .prepare("SELECT COUNT(*) AS count FROM expenses WHERE deleted_at IS NULL AND spent_on BETWEEN ? AND ?")
+    .bind(period.from, period.to)
+    .first<{ count: number }>();
+  return row?.count ?? 0;
+}
+
 /** The number of active entries dated `spentOn`, from the whole ledger (D18). */
 export async function countActiveEntriesOn(db: D1Database, spentOn: string): Promise<number> {
   checkDate("spentOn", spentOn);
@@ -392,6 +402,27 @@ export async function listBackupEntries(db: D1Database, window: BackupWindow): P
   const { results } = await db
     .prepare("SELECT * FROM expenses WHERE spent_on >= ?1 OR updated_at >= ?2 ORDER BY id")
     .bind(window.datedFrom, window.changedSince)
+    .all<ExpenseRow>();
+  return results.map(toEntry);
+}
+
+/**
+ * The greatest entry id, removed entries included; 0 for an empty ledger. Entries are
+ * never deleted, so the ids from 1 to this one are every entry the ledger holds.
+ */
+export async function maxEntryId(db: D1Database): Promise<number> {
+  const row = await db.prepare("SELECT MAX(id) AS id FROM expenses").first<{ id: number | null }>();
+  return row?.id ?? 0;
+}
+
+/** Every entry, removed ones included, with an id from `fromId` to `toId`, in id order. */
+export async function listEntriesByIdRange(db: D1Database, fromId: number, toId: number): Promise<Entry[]> {
+  if (!Number.isSafeInteger(fromId) || !Number.isSafeInteger(toId) || fromId < 1 || toId < fromId) {
+    throw new RangeError("fromId and toId must be whole numbers with 1 <= fromId <= toId");
+  }
+  const { results } = await db
+    .prepare("SELECT * FROM expenses WHERE id BETWEEN ?1 AND ?2 ORDER BY id")
+    .bind(fromId, toId)
     .all<ExpenseRow>();
   return results.map(toEntry);
 }

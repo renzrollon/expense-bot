@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import {
   addMessageEntries,
+  countActiveEntries,
   countDaysWithEntries,
   findRemovalAt,
   getEntry,
@@ -224,6 +225,31 @@ describe("Days with entries in a period", () => {
   it("Edge case — an empty period", async () => {
     await storeOne({ spentOn: "2026-08-15" });
     expect(await countDaysWithEntries(db, SEPTEMBER)).toBe(0);
+  });
+});
+
+describe("Active entries in a period", () => {
+  it("Happy path — entries inside the period, both end dates included", async () => {
+    await storeOne({ spentOn: "2026-08-31" });
+    await storeOne({ spentOn: "2026-09-01" });
+    await storeOne({ spentOn: "2026-09-30" });
+    await storeOne({ spentOn: "2026-10-01" });
+    expect(await countActiveEntries(db, SEPTEMBER)).toBe(2);
+  });
+
+  it("Failure — a malformed date is rejected", async () => {
+    await expectRangeError(countActiveEntries(silentDb(), { from: "2026-09-01", to: "30 Sep 2026" }));
+  });
+
+  it("Edge case — removed entries are not counted", async () => {
+    const gone = await storeOne({ spentOn: "2026-09-03" });
+    await remove(gone.id, ANA, new Date("2026-09-29T11:00:00.000Z"));
+    await storeOne({ spentOn: "2026-09-10" });
+    expect(await countActiveEntries(db, SEPTEMBER)).toBe(1);
+  });
+
+  it("Edge case — an empty ledger", async () => {
+    expect(await countActiveEntries(db, SEPTEMBER)).toBe(0);
   });
 });
 

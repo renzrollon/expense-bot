@@ -2,21 +2,18 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { parseJsonc } from "./lib/jsonc.mjs";
 
-const text = readFileSync(fileURLToPath(new URL("../wrangler.jsonc", import.meta.url)), "utf8");
-// JSONC allows comments. Only whole-line `//` comments are removed, so a `//` inside a string stays.
-const config = JSON.parse(
-  text
-    .split("\n")
-    .filter((line) => !line.trimStart().startsWith("//"))
-    .join("\n"),
-);
+// Only what a deploy must not change is checked here. The values under `vars` are the
+// household's own settings, so no test reads them.
+const config = parseJsonc(readFileSync(fileURLToPath(new URL("../wrangler.jsonc", import.meta.url)), "utf8"));
 
 test("the Worker has exactly one cron trigger, at the start of every hour", () => {
   assert.deepEqual(config.triggers?.crons, ["0 * * * *"]);
 });
 
-test("the nudge is enabled and set to 21:00", () => {
-  assert.equal(config.vars?.NUDGE_ENABLED, "true");
-  assert.equal(config.vars?.NUDGE_HOUR, "21");
+test("the database binding is named DB and points at the migrations folder", () => {
+  assert.equal(config.d1_databases?.length, 1);
+  assert.equal(config.d1_databases[0].binding, "DB");
+  assert.equal(config.d1_databases[0].migrations_dir, "migrations");
 });

@@ -56,6 +56,7 @@ interface Reply {
   text: string;
   lines: string[];
   replyTo: unknown;
+  sentWithoutReply: unknown;
   chatId: unknown;
 }
 
@@ -66,12 +67,13 @@ function onlyReply(): Reply {
   const payload = sends[0]?.payload as {
     text: string;
     chat_id: unknown;
-    reply_parameters?: { message_id?: unknown };
+    reply_parameters?: { message_id?: unknown; allow_sending_without_reply?: unknown };
   };
   return {
     text: payload.text,
     lines: payload.text.split("\n"),
     replyTo: payload.reply_parameters?.message_id,
+    sentWithoutReply: payload.reply_parameters?.allow_sending_without_reply,
     chatId: payload.chat_id,
   };
 }
@@ -89,6 +91,7 @@ describe("Ping command", () => {
     const reply = await ping();
 
     expect(reply.replyTo).toBe(PING_MESSAGE_ID);
+    expect(reply.sentWithoutReply).toBe(true);
     expect(reply.chatId).toBe(ALLOWED_CHAT_ID);
     expect(reply.lines).toHaveLength(4);
     expect(reply.lines[0]).toBe("🏓 expense-bot 0.1.0");
@@ -209,6 +212,7 @@ describe("Help command", () => {
     expect(response.status).toBe(200);
     const reply = onlyReply();
     expect(reply.replyTo).toBe(PING_MESSAGE_ID);
+    expect(reply.sentWithoutReply).toBe(true);
     expect(reply.lines).toEqual(HELP_LINES);
   });
 

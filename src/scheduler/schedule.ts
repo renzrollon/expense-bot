@@ -1,7 +1,18 @@
-import { RegistrationError, type JobSchedule, type Registry } from "../gateway/registry";
+import { RegistrationError, type JobRegistration, type JobSchedule, type Registry } from "../gateway/registry";
 
-/** A run up to this many minutes after its slot still runs; later, it is skipped (Decision 5, D8). */
-export const GRACE_MINUTES = 180;
+/**
+ * A run up to this many hours after its slot still runs; later, it is skipped
+ * (Decision 5, D8). A job may register its own window instead.
+ */
+export const DEFAULT_CATCH_UP_HOURS = 3;
+
+/** The longest window of each schedule kind: shorter than the shortest time between two slots. */
+const MAX_CATCH_UP_HOURS: Record<JobSchedule["every"], number> = { day: 23, week: 167, month: 671 };
+
+/** How many minutes after its slot a run of this job may still start. */
+export function catchUpMinutes(job: Pick<JobRegistration, "catchUpHours">): number {
+  return (job.catchUpHours ?? DEFAULT_CATCH_UP_HOURS) * 60;
+}
 
 /** A wall-clock reading in the household timezone (Decision 3). */
 export interface LocalTime {
@@ -85,7 +96,7 @@ export function latestSlot(schedule: JobSchedule, local: LocalTime): Slot {
   };
 }
 
-/** Throws RegistrationError for the first invalid job name or schedule (Decision 8). */
+/** Throws RegistrationError for the first invalid job name, schedule or catch-up window (Decision 8). */
 export function validateJobs(jobs: Registry["jobs"]): void {
   for (const job of jobs) {
     const { name, module } = job;
@@ -112,6 +123,13 @@ export function validateJobs(jobs: Registry["jobs"]): void {
     if (schedule.every === "month" && !isWhole(schedule.day, 1, 28)) {
       throw new RegistrationError(
         `${where} has day ${show(schedule.day)}; the day must be a whole number from 1 to 28`,
+      );
+    }
+    const hours = (job as { catchUpHours?: unknown }).catchUpHours;
+    const maxHours = MAX_CATCH_UP_HOURS[schedule.every];
+    if (hours !== undefined && !isWhole(hours, 1, maxHours)) {
+      throw new RegistrationError(
+        `${where} has catch-up window ${show(hours)}; it must be a whole number of hours from 1 to ${maxHours}`,
       );
     }
   }

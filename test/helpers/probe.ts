@@ -17,7 +17,7 @@ export interface ProbeOptions {
   callbacks?: string[];
   messages?: string[];
   editedMessages?: string[];
-  jobs?: { name: string; schedule?: JobSchedule }[];
+  jobs?: { name: string; schedule?: JobSchedule; catchUpHours?: number; alertOnFailure?: boolean }[];
   status?: string[];
 }
 
@@ -63,6 +63,8 @@ export function probeModule(options: ProbeOptions = {}): Probe {
     jobs: (options.jobs ?? []).map((job) => ({
       name: job.name,
       schedule: job.schedule ?? { every: "day", hour: 9 },
+      ...(job.catchUpHours === undefined ? {} : { catchUpHours: job.catchUpHours }),
+      ...(job.alertOnFailure === undefined ? {} : { alertOnFailure: job.alertOnFailure }),
       run: async (context: JobContext) => record(`job:${job.name}`, [context]),
     })),
     ...(options.status

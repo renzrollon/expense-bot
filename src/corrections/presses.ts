@@ -36,27 +36,40 @@ function pressedMessage(ctx: BotContext): EditTarget | null {
   return message === undefined ? null : { chatId: message.chat.id, messageId: message.message_id };
 }
 
+/**
+ * Whether the pressed message is the confirmation of the entry. An entry id is used
+ * again after rows are lost, so the id in a button does not name the entry by itself:
+ * an old button must not change a newer entry that took its id. An entry whose
+ * confirmation id was never saved is matched by the message its confirmation replies to.
+ */
+function isConfirmationOf(ctx: BotContext, target: EditTarget, entry: Entry): boolean {
+  if (target.chatId !== entry.chatId) return false;
+  if (entry.confirmationMessageId !== null) return entry.confirmationMessageId === target.messageId;
+  const message = ctx.callbackQuery?.message;
+  const repliedTo = message !== undefined && "reply_to_message" in message ? message.reply_to_message : undefined;
+  return repliedTo?.message_id === entry.sourceMessageId;
+}
+
 function handler(kind: PressKind, apply: Apply): (ctx: BotContext, payload: string) => Promise<void> {
   return async (ctx, payload) => {
     // 1. Parse the data.
     const press = parsePress(kind, payload);
     if (press === null) return answerPress(ctx, STALE_BUTTON_NOTICE);
 
-    // 2. Read the entry.
+    // 2. Read the entry, and check that the button is on its confirmation.
     const found = await getEntry(ctx.gateway.db, press.entryId);
     if (found === null) return answerPress(ctx, STALE_BUTTON_NOTICE);
+    const target = pressedMessage(ctx);
+    if (target === null || !isConfirmationOf(ctx, target, found)) return answerPress(ctx, STALE_BUTTON_NOTICE);
 
     // 3 and 4. Change the ledger, and teach.
     const outcome = await apply(ctx, press, found);
     if (outcome === null) return answerPress(ctx, STALE_BUTTON_NOTICE);
 
     // 5. Set the message the button is on.
-    const target = pressedMessage(ctx);
-    if (target !== null) {
-      const { entry } = outcome;
-      if (outcome.grid === true) await showButtons(ctx.api, target, categoryGrid(entry.id), ctx.update.update_id);
-      else await refreshConfirmation(ctx, entry, target);
-    }
+    const { entry } = outcome;
+    if (outcome.grid === true) await showButtons(ctx.api, target, categoryGrid(entry.id), ctx.update.update_id);
+    else await refreshConfirmation(ctx, entry, target);
 
     // 6. Answer last.
     await answerPress(ctx, outcome.notice);

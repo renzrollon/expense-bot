@@ -7,6 +7,7 @@ export type Token =
 const GROUPED_NUMBER = /(?<![0-9])[0-9]{1,3}(?:,[0-9][0-9][0-9])+(?![0-9])/g;
 
 const WHITE_SPACE = /\s/;
+const DIGIT = /[0-9]/;
 
 /** Punctuation at the ends of a word that is ignored when it is read (D35). */
 const LEADING = new Set(["(", "[", "{", '"', "'", "“", "‘", "«"]);
@@ -14,7 +15,8 @@ const TRAILING = new Set([")", "]", "}", '"', "'", "”", "’", "»", ".", "!",
 
 /**
  * Splits the text into words and separators in one walk (design Decision 4). New
- * lines, `,`, `;` and `+` separate, except the commas of grouped numbers. The word
+ * lines, `,`, `;` and `+` separate, except the commas of grouped numbers and a `+`
+ * that starts a word and is joined to a digit, as in `+1`, which is a sign. The word
  * `and` becomes a token of its own. Every token keeps its text as typed.
  */
 export function splitWords(text: string): Token[] {
@@ -40,7 +42,11 @@ export function splitWords(text: string): Token[] {
       tokens.push({ kind: "separator", text: "\n" });
     } else if (WHITE_SPACE.test(char)) {
       endWord(index);
-    } else if (char === ";" || char === "+" || (char === "," && !keptCommas.has(index))) {
+    } else if (
+      char === ";" ||
+      (char === "+" && !(start < 0 && DIGIT.test(text[index + 1] ?? ""))) ||
+      (char === "," && !keptCommas.has(index))
+    ) {
       endWord(index);
       tokens.push({ kind: "separator", text: char });
     } else if (start < 0) {

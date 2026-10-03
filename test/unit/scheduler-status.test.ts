@@ -18,6 +18,7 @@ function run(job: string, fields: Partial<RunRecord> = {}): RunRecord {
     status: "done",
     attempts: 1,
     startedAt: "2026-09-30T13:00:00.000Z",
+    lastError: null,
     ...fields,
   };
 }
@@ -64,6 +65,30 @@ describe("formatStatusLines", () => {
       jobs("nightly"),
       [run("nightly", { status: "failed", attempts: 2 })],
       ["Job nightly: failed · Sep 30 21:00 · 2 attempts"],
+    ],
+    [
+      "a failed run with its reason",
+      jobs("nightly"),
+      [run("nightly", { status: "failed", attempts: 3, lastError: "BACKUP_CHAT_ID is not a chat id" })],
+      ["Job nightly: failed · Sep 30 21:00 · 3 attempts · BACKUP_CHAT_ID is not a chat id"],
+    ],
+    [
+      "a failed run with a long reason on two lines",
+      jobs("nightly"),
+      [
+        run("nightly", {
+          status: "failed",
+          attempts: 1,
+          lastError: "Call to 'sendDocument' failed!   (400: Bad Request: chat not found)\nat stack",
+        }),
+      ],
+      ["Job nightly: failed · Sep 30 21:00 · 1 attempt · Call to 'sendDocument' failed! (400: Bad Request: chat not…"],
+    ],
+    [
+      "a running run keeps an earlier attempt's reason to itself",
+      jobs("nightly"),
+      [run("nightly", { status: "running", startedAt: minutesBefore(10), lastError: "boom" })],
+      ["Job nightly: running · Sep 30 21:00"],
     ],
     [
       "a record of an unregistered job",

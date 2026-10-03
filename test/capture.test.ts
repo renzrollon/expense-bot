@@ -221,6 +221,46 @@ describe("Which messages are captured", () => {
     expect(stored[0]).toMatchObject({ amount_centavos: 25000, description: "lunch" });
     expect(sent()).toHaveLength(1);
   });
+
+  it("A forwarded message is ignored", async () => {
+    const update = textUpdate("lunch 250");
+    Object.assign(update.message!, {
+      forward_origin: { type: "hidden_user", date: seconds(SENT) - 3600, sender_user_name: "Someone" },
+    });
+
+    const response = await deliver(update);
+
+    expect(response.status).toBe(200);
+    await expectNothingHappened();
+  });
+
+  it("A message sent through another bot is ignored", async () => {
+    const update = textUpdate("lunch 250");
+    Object.assign(update.message!, { via_bot: { id: 555, is_bot: true, first_name: "Gif", username: "gif" } });
+
+    const response = await deliver(update);
+
+    expect(response.status).toBe(200);
+    await expectNothingHappened();
+  });
+
+  it("A reply to another message is captured", async () => {
+    const update = textUpdate("lunch 250");
+    Object.assign(update.message!, {
+      reply_to_message: {
+        message_id: MESSAGE_ID - 1,
+        date: seconds(SENT) - 60,
+        chat: update.message!.chat,
+        text: "magkano lunch",
+      },
+    });
+
+    const response = await deliver(update);
+
+    expect(response.status).toBe(200);
+    expect(await rows()).toHaveLength(1);
+    expect(onlyReply()).toBe("✅ ₱250 · 🍽 Dining · Ana · today");
+  });
 });
 
 describe("The message is read at the time it was sent", () => {
@@ -265,6 +305,11 @@ describe("Ordinary chat gets no reply", () => {
   it.each([
     ["thanks", "ok thanks"],
     ["a time of day", "see you at 5pm"],
+    ["a time without am or pm", "see you at 7"],
+    ["a one-time code", "OTP: 123456"],
+    ["a phone number", "call me 0917 123 4567"],
+    ["a plus one", "+1"],
+    ["a future date and a time", "see you on oct 15 at 7"],
     ["a question in Tagalog", "magkano na gastos natin?"],
     ["an expense with a question mark", "lunch 250?"],
   ])("Casual chat: %s", async (_label, text) => {

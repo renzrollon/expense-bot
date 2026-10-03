@@ -13,6 +13,14 @@ export interface RunRecord {
   attempts: number;
   /** ISO-8601 UTC; null only for a skipped record. */
   startedAt: string | null;
+  /** The last attempt's error message, cut to 500 characters; null when none failed. */
+  lastError: string | null;
+}
+
+/** A run record as a tick reads it, before deciding what to do. */
+export interface TickRecord extends Omit<RunRecord, "scheduledHour" | "lastError"> {
+  /** True when the job has a run record for an earlier scheduled date. */
+  hasEarlierRun: boolean;
 }
 
 /** The primary key of a run record. */
@@ -31,26 +39,31 @@ interface RunRow {
   started_at: string | null;
 }
 
+interface TickRow extends RunRow {
+  has_earlier_run: number;
+}
+
 const ERROR_MAX = 500;
 
 /**
- * Reads the run records for every key in one statement, keyed by `${job}\n${date}`.
- * With no keys it runs no statement.
+ * Reads the run records for every key in one statement, keyed by `${job}\n${date}`,
+ * each with whether the job has a record for an earlier date. With no keys it runs
+ * no statement.
  */
-export async function findRuns(
-  db: D1Database,
-  keys: RunKey[],
-): Promise<Map<string, Omit<RunRecord, "scheduledHour">>> {
-  const runs = new Map<string, Omit<RunRecord, "scheduledHour">>();
+export async function findRuns(db: D1Database, keys: RunKey[]): Promise<Map<string, TickRecord>> {
+  const runs = new Map<string, TickRecord>();
   if (keys.length === 0) return runs;
   const values = keys.map((_, i) => `(?${2 * i + 1}, ?${2 * i + 2})`).join(", ");
   const { results } = await db
     .prepare(
-      `SELECT job, scheduled_date, status, attempts, started_at FROM job_runs
+      `SELECT job, scheduled_date, status, attempts, started_at,
+         EXISTS (SELECT 1 FROM job_runs AS e WHERE e.job = r.job AND e.scheduled_date < r.scheduled_date)
+           AS has_earlier_run
+       FROM job_runs AS r
        WHERE (job, scheduled_date) IN (VALUES ${values})`,
     )
     .bind(...keys.flatMap((key) => [key.job, key.scheduledDate]))
-    .all<RunRow>();
+    .all<TickRow>();
   for (const row of results) {
     runs.set(`${row.job}\n${row.scheduled_date}`, {
       job: row.job,
@@ -58,6 +71,7 @@ export async function findRuns(
       status: row.status,
       attempts: row.attempts,
       startedAt: row.started_at,
+      hasEarlierRun: row.has_earlier_run === 1,
     });
   }
   return runs;
@@ -129,13 +143,13 @@ export async function recordSkipped(db: D1Database, input: RunInput): Promise<bo
 export async function latestRuns(db: D1Database): Promise<RunRecord[]> {
   const { results } = await db
     .prepare(
-      `SELECT r.job, r.scheduled_date, r.scheduled_hour, r.status, r.attempts, r.started_at
+      `SELECT r.job, r.scheduled_date, r.scheduled_hour, r.status, r.attempts, r.started_at, r.last_error
        FROM job_runs AS r
        JOIN (SELECT job, MAX(scheduled_date) AS scheduled_date FROM job_runs GROUP BY job) AS latest
          ON latest.job = r.job AND latest.scheduled_date = r.scheduled_date
        ORDER BY r.job`,
     )
-    .all<RunRow & { scheduled_hour: number }>();
+    .all<RunRow & { scheduled_hour: number; last_error: string | null }>();
   return results.map((row) => ({
     job: row.job,
     scheduledDate: row.scheduled_date,
@@ -143,5 +157,6 @@ export async function latestRuns(db: D1Database): Promise<RunRecord[]> {
     status: row.status,
     attempts: row.attempts,
     startedAt: row.started_at,
+    lastError: row.last_error,
   }));
 }

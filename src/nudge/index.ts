@@ -1,3 +1,4 @@
+import { NUDGE_CATCH_UP_HOURS } from "../config/schedule";
 import { STALE_BUTTON_NOTICE } from "../gateway/bot";
 import type { BotContext, FeatureModule, JobContext, JobRegistration } from "../gateway/registry";
 import { countActiveEntriesOn } from "../ledger";
@@ -78,7 +79,14 @@ async function pressNoSpending(ctx: BotContext, payload: string): Promise<void> 
  */
 export function createNudge(settings: NudgeSettings): FeatureModule {
   const jobs: JobRegistration[] = settings.enabled
-    ? [{ name: "evening_nudge", schedule: { every: "day", hour: settings.hour }, run: eveningNudge }]
+    ? [
+        {
+          name: "evening_nudge",
+          schedule: { every: "day", hour: settings.hour },
+          catchUpHours: NUDGE_CATCH_UP_HOURS,
+          run: eveningNudge,
+        },
+      ]
     : [];
   return {
     name: "nudge",

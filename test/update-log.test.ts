@@ -1,12 +1,13 @@
 import { createExecutionContext, waitOnExecutionContext } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { Update } from "grammy/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createGateway } from "../src/gateway";
 import type { FeatureModule } from "../src/gateway/registry";
 import { ALLOWED_CHAT_ID, MEMBER_A } from "./helpers/constants";
 import { failingDb, useCleanTables } from "./helpers/db";
 import { probeModule } from "./helpers/probe";
+import { logEntries } from "./helpers/scheduler";
 import { signedRequest } from "./helpers/requests";
 import { installTelegramStub, type TelegramStub } from "./helpers/telegram";
 import { messageUpdate } from "./helpers/updates";
@@ -224,6 +225,23 @@ describe("Retry on redelivery", () => {
       attempts: 1,
       last_error: "sheet is locked",
     });
+  });
+
+  it("A failed attempt is logged with a reason code, not its error message", async () => {
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const probe = probeModule({ messages: ["only"] });
+    probe.failWith(new Error("lunch 250 by Ana"));
+
+    try {
+      await send([probe.module], messageUpdate({ text: "coffee 120", updateId: 539 }));
+
+      expect(logEntries(logSpy).filter((entry) => entry["event"] === "attempt_failed")).toEqual([
+        { event: "attempt_failed", update_id: 539, attempt: 1, status: 500, reason: "other" },
+      ]);
+      expect(logSpy.mock.calls.map((args) => String(args[0])).join("\n")).not.toContain("lunch 250 by Ana");
+    } finally {
+      logSpy.mockRestore();
+    }
   });
 
   it("Retry succeeds", async () => {

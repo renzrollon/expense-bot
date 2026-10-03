@@ -271,6 +271,52 @@ describe("Numbers that are not amounts", () => {
       items(item(50000, "https://shop.example/item/12345")),
     );
   });
+
+  it.each([["see you at 7"], ["alas 7 ng gabi"]])("Time after a word: %s", (text) => {
+    expect(parse(text)).toEqual(NOT_EXPENSE);
+  });
+
+  it.each([["OTP: 123456"], ["otp is 123456"], ["Your OTP - 4821"], ["pin 4821"], ["acct no. 1234567"]])(
+    "Code after a reference word: %s",
+    (text) => {
+      expect(parse(text)).toEqual(NOT_EXPENSE);
+    },
+  );
+
+  it("Reference next to an amount", () => {
+    expect(parse("groceries 2340 gcash ref 12345")).toEqual(items(item(234000, "groceries gcash ref 12345")));
+  });
+
+  it.each<[string, number, string]>([
+    ["tickets at ₱500", 50000, "tickets at"],
+    ["bought at 1,500", 150000, "bought at"],
+    ["sold at 1.5k", 150000, "sold at"],
+  ])("Marked or formatted amount after a reference word: %s", (text, centavos, description) => {
+    expect(parse(text)).toEqual(items(item(centavos, description)));
+  });
+
+  it("Year after the word year", () => {
+    expect(parse("Happy New Year 2026!")).toEqual(NOT_EXPENSE);
+  });
+
+  it("Number with a leading zero", () => {
+    expect(parse("room 007")).toEqual(NOT_EXPENSE);
+  });
+
+  it.each([["call me 0917 123 4567"], ["0917 1234567"], ["1234 5678 9012 3456"]])(
+    "Number written in groups: %s",
+    (text) => {
+      expect(parse(text)).toEqual(NOT_EXPENSE);
+    },
+  );
+
+  it("Number in groups next to an amount", () => {
+    expect(parse("load 0917 123 4567 ₱100")).toEqual(items(item(10000, "load 0917 123 4567")));
+  });
+
+  it.each([["+1"], ["+63 917 123 4567"]])("Number with a plus sign in front: %s", (text) => {
+    expect(parse(text)).toEqual(NOT_EXPENSE);
+  });
 });
 
 describe("Several numbers in one item", () => {
@@ -297,6 +343,26 @@ describe("Several numbers in one item", () => {
   it("The same number twice", () => {
     expect(parse("250 lunch 250")).toEqual(items(ambiguous(25000, "250 lunch")));
   });
+
+  it("Quantity after the amount", () => {
+    expect(parse("grab 180 (2 rides)")).toEqual(items(ambiguous(18000, "grab (2 rides)")));
+  });
+
+  it("Amount written as money before a quantity", () => {
+    expect(parse("Paid 1,500 for 3 shirts")).toEqual(items(ambiguous(150000, "Paid for 3 shirts")));
+  });
+
+  it.each<[string, number, string]>([
+    ["2 rides 180.50", 18050, "2 rides"],
+    ["1.5k shoes for 2000", 150000, "shoes for 2000"],
+    ["3 boxes 1,200 tip 50", 120000, "3 boxes tip 50"],
+  ])("An amount written as money wins over a larger plain number: %s", (text, centavos, description) => {
+    expect(parse(text)).toEqual(items(ambiguous(centavos, description)));
+  });
+
+  it("An amount out of range is not chosen while another is in range", () => {
+    expect(parse("lunch 250 10,000,000")).toEqual(items(ambiguous(25000, "lunch 10,000,000")));
+  });
 });
 
 describe("Several expenses in one message", () => {
@@ -322,6 +388,10 @@ describe("Several expenses in one message", () => {
 
   it("Plus sign", () => {
     expect(parse("grab 180 + lunch 250")).toEqual(GRAB_AND_LUNCH);
+  });
+
+  it("Plus sign joined to a number", () => {
+    expect(parse("grab 180 +50 tip")).toEqual(items(item(18000, "grab +50 tip")));
   });
 
   it("Separator without spaces", () => {
@@ -429,7 +499,7 @@ describe("Entry date", () => {
   });
 
   it("More days ago than the limit is not a date", () => {
-    expect(parse("10000 days ago lunch 250")).toEqual(items(ambiguous(25000, "10000 days ago lunch")));
+    expect(parse("10000 days ago lunch ₱250")).toEqual(items(item(25000, "10000 days ago lunch")));
   });
 
   it("Month then day", () => {
@@ -483,6 +553,21 @@ describe("Entry date", () => {
   it("Month name takes the only number", () => {
     expect(parse("jun 20")).toEqual(NOT_EXPENSE);
   });
+
+  it.each<[string, number, string]>([
+    ["may 2 kape 300", 30000, "may 2 kape"],
+    ["jan 2 rent 12000", 1200000, "jan 2 rent"],
+  ])("The words may and jan before a day number: %s", (text, centavos, description) => {
+    expect(parse(text)).toEqual(items(ambiguous(centavos, description)));
+  });
+
+  it.each<[string, string]>([
+    ["2 may kape 300", "2026-05-02"],
+    ["2 jan kape 300", "2026-01-02"],
+    ["january 2 kape 300", "2026-01-02"],
+  ])("The months May and January: %s", (text, date) => {
+    expect(parse(text)).toEqual(items(item(30000, "kape", { date })));
+  });
 });
 
 describe("Date without a year", () => {
@@ -514,6 +599,39 @@ describe("Date without a year", () => {
     expect(parse("dec 31 gift 500", new Date("2028-07-01T00:00:00Z"))).toEqual(
       items(item(50000, "gift", { date: "2027-12-31" })),
     );
+  });
+});
+
+describe("Date with a year", () => {
+  it.each([["sep 27 2026 meralco 3200"], ["27 sep 2026 meralco 3200"], ["meralco 3200 Sep 27, 2026"]])(
+    "Month, day and year: %s",
+    (text) => {
+      expect(parse(text)).toEqual(items(item(320000, "meralco", { date: "2026-09-27" })));
+    },
+  );
+
+  it("The year is not read as an amount", () => {
+    expect(parse("lunch 250 on Sep 27, 2026")).toEqual(items(item(25000, "lunch on", { date: "2026-09-27" })));
+  });
+
+  it("The year before", () => {
+    expect(parse("sep 30 2025 meralco 3200")).toEqual(items(item(320000, "meralco", { date: "2025-09-30" })));
+  });
+
+  it("The year after", () => {
+    expect(parse("5 jan 2027 rent 12000")).toEqual(rejected("future_date"));
+  });
+
+  it("A date that does not exist in that year", () => {
+    expect(parse("feb 29 2025 lunch 250")).toEqual(rejected("invalid_date"));
+  });
+
+  it("A number outside the three years is not a year", () => {
+    expect(parse("sep 27 2000 meralco")).toEqual(items(item(200000, "meralco", { date: "2026-09-27" })));
+  });
+
+  it("A date with a year and no amount", () => {
+    expect(parse("see you sep 27 2026")).toEqual(NOT_EXPENSE);
   });
 });
 

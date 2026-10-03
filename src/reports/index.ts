@@ -17,8 +17,9 @@ export const reports: FeatureModule = {
 
 /**
  * Replies to the command with the report from `start(today)` to today, where today
- * is the local date when the command is handled. A database failure is not caught,
- * so no reply is sent and the gateway runs the command again.
+ * is the local date when the command is handled. The reply is still sent when the
+ * command message was deleted. A database failure is not caught, so no reply is sent
+ * and the gateway runs the command again.
  */
 async function answer(ctx: BotContext, name: string, start: (today: string) => string): Promise<void> {
   const { db, now, timezone } = ctx.gateway;
@@ -27,7 +28,7 @@ async function answer(ctx: BotContext, name: string, start: (today: string) => s
   const text = formatReport(`${name} · ${rangeLabel(period)}`, await loadReport(db, period));
   const messageId = ctx.msg?.message_id;
   await ctx.reply(text, {
-    ...(messageId === undefined ? {} : { reply_parameters: { message_id: messageId } }),
+    ...(messageId === undefined ? {} : { reply_parameters: { message_id: messageId, allow_sending_without_reply: true } }),
     link_preview_options: { is_disabled: true },
   });
 }

@@ -66,6 +66,8 @@ describe("findRuns", () => {
           status: "failed",
           attempts: 2,
           startedAt: "2026-09-30T13:00:00.000Z",
+          // The record for 2026-09-29 is earlier.
+          hasEarlierRun: true,
         },
       ],
     ]);
@@ -93,9 +95,10 @@ describe("findRuns", () => {
     );
     expect(new Map([...runs].sort(([x], [y]) => x.localeCompare(y)))).toEqual(
       new Map([
-        ["a\n2026-09-30", { job: "a", scheduledDate: "2026-09-30", status: "done", attempts: 1, startedAt: "2026-09-30T13:00:00.000Z" }],
-        ["b\n2026-09-27", { job: "b", scheduledDate: "2026-09-27", status: "skipped", attempts: 0, startedAt: null }],
-        ["c\n2026-10-01", { job: "c", scheduledDate: "2026-10-01", status: "running", attempts: 1, startedAt: before(10 * MINUTE) }],
+        // a and c have a decoy on an earlier date; b's decoy is later.
+        ["a\n2026-09-30", { job: "a", scheduledDate: "2026-09-30", status: "done", attempts: 1, startedAt: "2026-09-30T13:00:00.000Z", hasEarlierRun: true }],
+        ["b\n2026-09-27", { job: "b", scheduledDate: "2026-09-27", status: "skipped", attempts: 0, startedAt: null, hasEarlierRun: false }],
+        ["c\n2026-10-01", { job: "c", scheduledDate: "2026-10-01", status: "running", attempts: 1, startedAt: before(10 * MINUTE), hasEarlierRun: true }],
       ]),
     );
   });
@@ -302,7 +305,7 @@ describe("latestRuns", () => {
 
   it("returns the record with the greatest scheduled date for each job", async () => {
     await insertRun(db, { job: "nightly", scheduledDate: "2026-09-29", status: "done" });
-    await insertRun(db, { job: "nightly", scheduledDate: "2026-09-30", status: "failed", attempts: 2 });
+    await insertRun(db, { job: "nightly", scheduledDate: "2026-09-30", status: "failed", attempts: 2, lastError: "boom" });
     await insertRun(db, { job: "nightly", scheduledDate: "2026-09-28", status: "done" });
     await insertRun(db, { job: "digest", scheduledDate: "2026-10-04", scheduledHour: 19, status: "running", startedAt: before(MINUTE) });
     await insertRun(db, { job: "digest", scheduledDate: "2026-09-27", scheduledHour: 19, status: "skipped" });
@@ -310,8 +313,8 @@ describe("latestRuns", () => {
     const runs = [...(await latestRuns(db))].sort((x, y) => x.job.localeCompare(y.job));
 
     expect(runs).toEqual<RunRecord[]>([
-      { job: "digest", scheduledDate: "2026-10-04", scheduledHour: 19, status: "running", attempts: 1, startedAt: before(MINUTE) },
-      { job: "nightly", scheduledDate: "2026-09-30", scheduledHour: 21, status: "failed", attempts: 2, startedAt: "2026-09-30T13:00:00.000Z" },
+      { job: "digest", scheduledDate: "2026-10-04", scheduledHour: 19, status: "running", attempts: 1, startedAt: before(MINUTE), lastError: null },
+      { job: "nightly", scheduledDate: "2026-09-30", scheduledHour: 21, status: "failed", attempts: 2, startedAt: "2026-09-30T13:00:00.000Z", lastError: "boom" },
     ]);
   });
 });

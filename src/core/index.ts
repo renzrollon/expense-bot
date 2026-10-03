@@ -53,10 +53,13 @@ async function help(ctx: BotContext): Promise<void> {
   await replyTo(ctx, lines.join("\n"));
 }
 
-/** One message, sent as a reply to the command message. */
+/** One message, sent as a reply to the command message, still sent when that message was deleted. */
 async function replyTo(ctx: BotContext, text: string): Promise<void> {
   const messageId = ctx.msg?.message_id;
-  await ctx.reply(text, messageId === undefined ? {} : { reply_parameters: { message_id: messageId } });
+  await ctx.reply(
+    text,
+    messageId === undefined ? {} : { reply_parameters: { message_id: messageId, allow_sending_without_reply: true } },
+  );
 }
 
 /** Short month, day without a leading zero, 24-hour time with two-digit hour and minute. */

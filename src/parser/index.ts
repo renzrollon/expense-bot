@@ -36,6 +36,27 @@ const NOT_EXPENSE: ParseResult = { kind: "not_expense" };
 
 const MARK_WORDS = new Set(["₱", "php"]);
 const NOT_AMOUNT_AFTER = new Set(["am", "pm", "%"]);
+/** A plain number after one of these words is a time, a code, a reference or a year. */
+const NOT_AMOUNT_BEFORE = new Set([
+  "at",
+  "alas",
+  "otp",
+  "pin",
+  "code",
+  "ref",
+  "reference",
+  "no",
+  "number",
+  "acct",
+  "account",
+  "year",
+]);
+/** A word that may stand between such a word and its number, as in `otp is 123456`. */
+const LINK_WORDS = new Set(["is"]);
+/** A word made only of the digits 0 to 9. */
+const PLAIN_NUMBER = /^[0-9]+$/;
+/** This many plain numbers in a row are a phone, card or account number. */
+const DIGIT_GROUP_WORDS = 3;
 /** A word made only of hyphens, dashes or colons. */
 const DASHES = /^[-‐‑‒–—―:]+$/;
 
@@ -125,9 +146,12 @@ function splitParts(tokens: Token[]): Part[] {
 /**
  * Reads the numbers among the words of one part, with a separate mark word joined to
  * the number after it, and a number followed by `am`, `pm` or `%` left out (Decision 5).
+ * A plain number that ordinary chat holds is left out too: one in a digit group, and
+ * one after a word such as `at`, `otp` or `ref`. A marked number is always read.
  */
 function readCandidates(words: WordToken[]): Candidate[] {
   const candidates: Candidate[] = [];
+  const grouped = digitGroups(words);
   for (let index = 0; index < words.length; index++) {
     const word = words[index] as WordToken;
     const next = words[index + 1];
@@ -145,9 +169,42 @@ function readCandidates(words: WordToken[]): Candidate[] {
     const reading = readAmount(word.bare);
     if (reading.kind === "not_amount") continue;
     if (!reading.marked && next !== undefined && NOT_AMOUNT_AFTER.has(next.bare.toLowerCase())) continue;
+    if (grouped.has(index) || followsReferenceWord(words, index)) continue;
     candidates.push({ reading, words: [word] });
   }
   return candidates;
+}
+
+/**
+ * The indexes of the plain numbers that stand in a digit group: a row of plain
+ * numbers that is three or more long, or that holds one written with a leading zero.
+ */
+function digitGroups(words: WordToken[]): Set<number> {
+  const grouped = new Set<number>();
+  for (let start = 0; start < words.length; ) {
+    let end = start;
+    let leadingZero = false;
+    while (end < words.length && PLAIN_NUMBER.test((words[end] as WordToken).bare)) {
+      const digits = (words[end] as WordToken).bare;
+      if (digits.length > 1 && digits.startsWith("0")) leadingZero = true;
+      end++;
+    }
+    if (end - start >= DIGIT_GROUP_WORDS || leadingZero) {
+      for (let index = start; index < end; index++) grouped.add(index);
+    }
+    start = Math.max(end, start + 1);
+  }
+  return grouped;
+}
+
+/** Whether the word is a plain number after a word of `NOT_AMOUNT_BEFORE`, with at most one linking word between. */
+function followsReferenceWord(words: WordToken[], index: number): boolean {
+  if (!PLAIN_NUMBER.test((words[index] as WordToken).bare)) return false;
+  let before = words[index - 1];
+  if (before !== undefined && (LINK_WORDS.has(before.bare.toLowerCase()) || DASHES.test(before.text))) {
+    before = words[index - 2];
+  }
+  return before !== undefined && NOT_AMOUNT_BEFORE.has(before.bare.toLowerCase());
 }
 
 /** The rejections that concern the date, in order (Decision 9), or the one date. */
@@ -188,13 +245,31 @@ function append(group: Group, part: Part): void {
   group.candidates.push(...part.candidates);
 }
 
-/** Decision 8: the only amount, the one marked amount, or else the last one, flagged. */
+/**
+ * Decision 8: the only amount, or the one marked amount. Otherwise the choice is
+ * flagged: the last of several marked amounts; or, with no mark, the largest amount in
+ * range among those written as money (a thousands separator, a decimal part or `k`)
+ * when there is one, else the largest in range, equal amounts going to the last. A
+ * quantity is usually smaller than the price, so `grab 180 (2 rides)` is ₱180. With no
+ * amount in range, the last one is chosen and the message is rejected.
+ */
 function chooseAmount(candidates: Candidate[]): { candidate: Candidate; flags: Flag[] } {
   const last = <T>(list: T[]): T => list[list.length - 1] as T;
   if (candidates.length === 1) return { candidate: candidates[0] as Candidate, flags: [] };
   const marked = candidates.filter((candidate) => candidate.reading.marked);
   if (marked.length === 1) return { candidate: marked[0] as Candidate, flags: [] };
-  return { candidate: last(marked.length > 0 ? marked : candidates), flags: ["ambiguous_amount"] };
+  if (marked.length > 0) return { candidate: last(marked), flags: ["ambiguous_amount"] };
+  const inRange = candidates.filter((candidate) => candidate.reading.kind === "amount");
+  const asMoney = inRange.filter((candidate) => !PLAIN_NUMBER.test(candidate.words[0]?.bare ?? ""));
+  const pool = asMoney.length > 0 ? asMoney : inRange;
+  return { candidate: pool.length > 0 ? largest(pool) : last(candidates), flags: ["ambiguous_amount"] };
+}
+
+/** The candidate with the largest amount; of equal amounts, the last. */
+function largest(candidates: Candidate[]): Candidate {
+  const centavos = (candidate: Candidate): number =>
+    candidate.reading.kind === "amount" ? candidate.reading.centavos : -1;
+  return candidates.reduce((best, candidate) => (centavos(candidate) >= centavos(best) ? candidate : best));
 }
 
 /** The words not used up by the amount, as typed, joined by single spaces (D29). */

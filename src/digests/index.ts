@@ -1,5 +1,10 @@
 import { NOT_COUNTED_IDS } from "../categories";
-import { MONTHLY_RECAP, WEEKLY_DIGEST } from "../config/schedule";
+import {
+  MONTHLY_RECAP,
+  MONTHLY_RECAP_CATCH_UP_HOURS,
+  WEEKLY_DIGEST,
+  WEEKLY_DIGEST_CATCH_UP_HOURS,
+} from "../config/schedule";
 import type { FeatureModule, JobContext } from "../gateway/registry";
 import { countDaysWithEntries, largestEntries, type Period } from "../ledger";
 import { shiftDate } from "../parser/dates";
@@ -48,7 +53,7 @@ async function monthlyRecap(job: JobContext): Promise<void> {
 export const digests: FeatureModule = {
   name: "digests",
   jobs: [
-    { name: "weekly_digest", schedule: WEEKLY_DIGEST, run: weeklyDigest },
-    { name: "monthly_recap", schedule: MONTHLY_RECAP, run: monthlyRecap },
+    { name: "weekly_digest", schedule: WEEKLY_DIGEST, catchUpHours: WEEKLY_DIGEST_CATCH_UP_HOURS, run: weeklyDigest },
+    { name: "monthly_recap", schedule: MONTHLY_RECAP, catchUpHours: MONTHLY_RECAP_CATCH_UP_HOURS, run: monthlyRecap },
   ],
 };

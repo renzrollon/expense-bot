@@ -69,6 +69,19 @@ test("Bot info prints the identity as one line of JSON and exits 0", async () =>
   assertNoToken(out, err);
 });
 
+test("Bot info with --escaped prints the identity as a JSON string, ready for wrangler.jsonc", async () => {
+  const { deps, out, err } = makeDeps({ responses: { getMe: ME } });
+  const code = await run(["bot-info", "--escaped"], deps);
+  assert.equal(code, 0);
+  assert.equal(out.length, 1);
+  assert.ok(out[0].startsWith('"{\\"id\\":42,'));
+  // Pasted after "BOT_INFO": the line makes a valid file, and the setting parses back to the identity.
+  const config = JSON.parse(`{ "vars": { "BOT_INFO": ${out[0]} } }`);
+  assert.deepEqual(JSON.parse(config.vars.BOT_INFO), ME);
+  assert.deepEqual(err, []);
+  assertNoToken(out, err);
+});
+
 test("Privacy mode is on warns on standard error and still exits 0", async () => {
   const me = { ...ME, can_read_all_group_messages: false };
   const { deps, out, err } = makeDeps({ responses: { getMe: me } });

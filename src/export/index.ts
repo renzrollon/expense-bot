@@ -9,5 +9,5 @@ export { readBackupChatId } from "./backup";
 export const exporter: FeatureModule = {
   name: "export",
   commands: [{ name: "export", description: EXPORT_DESCRIPTION, handle: handleExport }],
-  jobs: [{ name: NIGHTLY_BACKUP_JOB, schedule: NIGHTLY_BACKUP, run: runNightlyBackup }],
+  jobs: [{ name: NIGHTLY_BACKUP_JOB, schedule: NIGHTLY_BACKUP, run: runNightlyBackup, alertOnFailure: true }],
 };

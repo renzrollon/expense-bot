@@ -46,11 +46,14 @@ function removedText(entry: Entry): string {
   return `↩️ Removed ${parts.join(" · ")}`;
 }
 
-/** One message, sent as a reply to the command, with link previews off. */
+/**
+ * One message, sent as a reply to the command, with link previews off. It is still
+ * sent when the command message was deleted, because the entry is already removed.
+ */
 async function reply(ctx: BotContext, text: string): Promise<void> {
   const messageId = ctx.msg?.message_id;
   await ctx.reply(text, {
-    ...(messageId === undefined ? {} : { reply_parameters: { message_id: messageId } }),
+    ...(messageId === undefined ? {} : { reply_parameters: { message_id: messageId, allow_sending_without_reply: true } }),
     link_preview_options: { is_disabled: true },
   });
 }

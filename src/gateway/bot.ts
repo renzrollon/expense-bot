@@ -1,4 +1,6 @@
 import { Bot } from "grammy";
+import { telegramClientOptions, waitOutShortRateLimits } from "../telegram/client";
+import { answerPress } from "../telegram/inplace";
 import type { Config } from "./config";
 import type { BotContext } from "./registry";
 
@@ -17,9 +19,10 @@ export function buildBot(config: Config, state: GatewayState): Bot<BotContext> {
   const bot = new Bot<BotContext>(config.botToken, {
     // Known identity, so grammY never calls getMe.
     botInfo: config.botInfo,
-    // Look up the global fetch at call time, so tests can replace it.
-    client: { fetch: ((input, init) => globalThis.fetch(input, init)) as typeof fetch },
+    client: telegramClientOptions(),
   });
+  // grammY copies the transformers of bot.api into each update's ctx.api.
+  bot.api.config.use(waitOutShortRateLimits());
   const { registry } = state;
 
   // 1. Attach the gateway state.
@@ -48,7 +51,8 @@ export function buildBot(config: Config, state: GatewayState): Bot<BotContext> {
         ? registry.callbacks.find((callback) => callback.prefix === data.slice(0, colon))
         : undefined;
     if (data === undefined || registration === undefined) {
-      await ctx.answerCallbackQuery({ text: STALE_BUTTON_NOTICE });
+      // A late press gets "query is too old" from Telegram; that must not fail the update.
+      await answerPress(ctx, STALE_BUTTON_NOTICE);
       return;
     }
     await registration.handle(ctx, data.slice(colon + 1));

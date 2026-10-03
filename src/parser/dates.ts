@@ -30,6 +30,11 @@ export function isRealDate(year: number, month: number, day: number): boolean {
   return read(utc(year, month, day)) === format(year, month, day);
 }
 
+/** The date with this year, month and day, or null when it is not a real date. */
+export function exactDate(year: number, month: number, day: number): string | null {
+  return isRealDate(year, month, day) ? format(year, month, day) : null;
+}
+
 /**
  * The nearest real date with this month and day, in the year of `today` or the year
  * before (D18). A tie goes to the earlier date. It may be in the future.

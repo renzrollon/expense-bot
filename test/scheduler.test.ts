@@ -168,6 +168,10 @@ describe("The system SHALL validate job schedules at startup", () => {
           schedule: { every: "week", weekday: 7, hour: 23 },
         },
         { name: "month_end", schedule: { every: "month", day: 28, hour: 23 } },
+        { name: "day_window", schedule: { every: "day", hour: 9 }, catchUpHours: 23 },
+        { name: "week_window", schedule: { every: "week", weekday: 1, hour: 9 }, catchUpHours: 167 },
+        { name: "month_window", schedule: { every: "month", day: 1, hour: 9 }, catchUpHours: 671 },
+        { name: "one_hour", schedule: { every: "day", hour: 9 }, catchUpHours: 1 },
       ],
     });
     const registry = buildRegistry([probe.module]);
@@ -177,6 +181,10 @@ describe("The system SHALL validate job schedules at startup", () => {
       "early",
       "sunday_late",
       "month_end",
+      "day_window",
+      "week_window",
+      "month_window",
+      "one_hour",
     ]);
   });
 
@@ -258,6 +266,25 @@ describe("The system SHALL validate job schedules at startup", () => {
       expect(message).toContain(field);
     },
   );
+
+  it.each<{ label: string; schedule: JobSchedule; hours: unknown }>([
+    { label: "a daily job with 24 hours", schedule: { every: "day", hour: 9 }, hours: 24 },
+    { label: "a weekly job with 168 hours", schedule: { every: "week", weekday: 1, hour: 9 }, hours: 168 },
+    { label: "a monthly job with 672 hours", schedule: { every: "month", day: 1, hour: 9 }, hours: 672 },
+    { label: "0 hours", schedule: { every: "day", hour: 9 }, hours: 0 },
+    { label: "1.5 hours", schedule: { every: "day", hour: 9 }, hours: 1.5 },
+    { label: "hours as text", schedule: { every: "day", hour: 9 }, hours: "3" },
+  ])("Failure — a catch-up window outside its limits: $label", ({ schedule, hours }) => {
+    const probe = probeModule({
+      name: "edge_module",
+      jobs: [{ name: "late", schedule, catchUpHours: hours as number }],
+    });
+
+    const create = () => createScheduler({ registry: buildRegistry([probe.module]) });
+
+    expect(create).toThrow(RegistrationError);
+    expect(create).toThrow(/"late"[\s\S]*"edge_module"[\s\S]*catch-up window/);
+  });
 });
 
 describe("The system SHALL run due jobs by household time", () => {
@@ -429,7 +456,45 @@ describe("The system SHALL run a job at most once per scheduled date", () => {
   });
 });
 
-describe("The system SHALL catch up missed jobs within 3 hours and skip them after", () => {
+describe("The system SHALL give each job its own catch-up window", () => {
+  it("Happy path — two jobs with their own windows", async () => {
+    const probe = probeModule({
+      jobs: [
+        { name: "digest", schedule: { every: "week", weekday: 3, hour: 21 }, catchUpHours: 48 },
+        { name: "nudge", schedule: DAY, catchUpHours: 1 },
+      ],
+    });
+    const scheduler = build(probe.module);
+
+    // Wednesday 2026-09-30 at 23:00: the nudge is 2 hours late, the digest too.
+    await fire(scheduler, "2026-09-30T15:00:00Z");
+    expect(probe.callsTo("job:nudge")).toHaveLength(0);
+    expect(await readRun(env.DB, "nudge", "2026-09-30")).toMatchObject({ status: "skipped" });
+    expect(dates(probe, "digest")).toEqual(["2026-09-30"]);
+  });
+
+  it("Edge case — the end of a 48-hour window", async () => {
+    const at = (iso: string) => {
+      const probe = probeModule({
+        jobs: [{ name: "digest", schedule: { every: "week", weekday: 3, hour: 21 }, catchUpHours: 48 }],
+      });
+      return { probe, run: () => fire(build(probe.module), iso) };
+    };
+
+    // Friday 2026-10-02 at 21:00, exactly 48 hours after the slot.
+    const onTime = at("2026-10-02T13:00:00Z");
+    await onTime.run();
+    expect(dates(onTime.probe, "digest")).toEqual(["2026-09-30"]);
+
+    await env.DB.prepare("DELETE FROM job_runs").run();
+    const late = at("2026-10-02T14:00:00Z");
+    await late.run();
+    expect(late.probe.callsTo("job:digest")).toHaveLength(0);
+    expect(await readRun(env.DB, "digest", "2026-09-30")).toMatchObject({ status: "skipped" });
+  });
+});
+
+describe("The system SHALL catch up missed jobs within their catch-up window and skip them after", () => {
   it("Happy path — a missed tick is caught up", async () => {
     const probe = probeWith(["nightly"]);
     const scheduler = build(probe.module);
@@ -492,6 +557,8 @@ describe("The system SHALL catch up missed jobs within 3 hours and skip them aft
       attempts: 3,
       lastError: "boom",
     });
+    // The job did not ask for a failure alert, so the group is told nothing.
+    expect(telegram.calls).toEqual([]);
   });
 });
 
@@ -578,6 +645,23 @@ describe("The system SHALL give each run its context", () => {
       scheduledDate: "2026-09-30",
       chatId: CHAT_ID,
     });
+  });
+
+  it("Edge case — a short rate limit is waited out inside the run", async () => {
+    const hello: FeatureModule = {
+      name: "hello_module",
+      jobs: [{ name: "hello", schedule: DAY, run: async (context) => void (await context.api.sendMessage(context.chatId, "hi")) }],
+    };
+    telegram.failNext("sendMessage", {
+      error_code: 429,
+      description: "Too Many Requests: retry after 0",
+      parameters: { retry_after: 0 },
+    });
+
+    await fire(build(hello), T_21);
+
+    expect(telegram.callsTo("sendMessage").map((call) => call.failed ?? false)).toEqual([true, false]);
+    expect(await readRun(env.DB, "hello", "2026-09-30")).toMatchObject({ status: "done", attempts: 1 });
   });
 
   it("Failure — no allowed chat id is stored", async () => {
@@ -728,11 +812,27 @@ describe("The system SHALL log run outcomes without their content", () => {
         job: "nightly",
         scheduled_date: "2026-09-30",
         attempt: 1,
+        reason: "other",
       },
     ]);
     expect(
       logSpy.mock.calls.map((args) => String(args[0])).join("\n"),
     ).not.toContain("lunch 250 by Ana");
+  });
+
+  it("Failure — a refused Telegram call is logged with its code", async () => {
+    const hello: FeatureModule = {
+      name: "hello_module",
+      jobs: [{ name: "hello", schedule: DAY, run: async (context) => void (await context.api.sendMessage(context.chatId, "hi")) }],
+    };
+    telegram.failNext("sendMessage", { error_code: 403, description: "Forbidden: bot was kicked from the supergroup chat" });
+
+    await fire(build(hello), T_21);
+
+    expect(events("job_failed")).toEqual([
+      { event: "job_failed", job: "hello", scheduled_date: "2026-09-30", attempt: 1, reason: "telegram_403" },
+    ]);
+    expect(logSpy.mock.calls.map((args) => String(args[0])).join("\n")).not.toContain("kicked");
   });
 
   it("Edge case — a skip is logged once", async () => {

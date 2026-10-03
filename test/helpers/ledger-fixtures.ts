@@ -79,7 +79,7 @@ export interface EditPayload {
 export interface SendPayload {
   chat_id: number;
   text: string;
-  reply_parameters?: { message_id?: number };
+  reply_parameters?: { message_id?: number; allow_sending_without_reply?: boolean };
   reply_markup?: unknown;
 }
 
@@ -106,6 +106,8 @@ export interface PressOptions {
   /** The bot message the button is on. */
   messageId: number;
   updateId?: number;
+  /** The message that the pressed message replies to. */
+  replyToMessageId?: number;
 }
 
 export interface CommandOptions {
@@ -300,6 +302,7 @@ export function useCorrectionsHarness(): CorrectionsHarness {
         updateId: options.updateId ?? nextUpdateId++,
         messageId: options.messageId,
         date: seconds(SENT),
+        ...(options.replyToMessageId === undefined ? {} : { replyToMessageId: options.replyToMessageId }),
         ...sender(options.from),
       });
     },

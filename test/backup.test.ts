@@ -6,7 +6,7 @@ import { exporter } from "../src/export";
 import { buildRegistry } from "../src/gateway/registry";
 import { createScheduler, type Scheduler } from "../src/scheduler";
 import { useCleanTables } from "./helpers/db";
-import { readRun, tick } from "./helpers/scheduler";
+import { insertRun, logEntries, readRun, tick } from "./helpers/scheduler";
 import { installTelegramStub, type MultipartPayload, type TelegramStub } from "./helpers/telegram";
 
 /** The group: the allowed chat id of the data-export spec. */
@@ -84,14 +84,18 @@ function build(): Scheduler {
 }
 
 /** Fires the tick at `iso`, with the scheduler's clock at the same time. */
-async function fire(iso: string, testEnv: Env = env, scheduler: Scheduler = build()): Promise<void> {
+async function fire(iso: string, testEnv: Env = envWith({}), scheduler: Scheduler = build()): Promise<void> {
   clock = new Date(iso);
   await tick(scheduler, iso, testEnv);
 }
 
-/** A changed copy of the test environment. */
+/**
+ * A changed copy of the test environment. `BACKUP_CHAT_ID` is absent unless given,
+ * whatever `wrangler.jsonc` sets, so the household's own value never changes a test.
+ */
 function envWith(overrides: Record<string, unknown>): Env {
-  return { ...env, ...overrides } as unknown as Env;
+  const { BACKUP_CHAT_ID: _live, ...rest } = { ...env } as Record<string, unknown>;
+  return { ...rest, ...overrides } as unknown as Env;
 }
 
 /** Writes one row of `expenses`, as entry 7 unless told otherwise. */
@@ -254,9 +258,88 @@ describe("send a nightly backup at 23:00", () => {
   });
 });
 
+describe("send the whole ledger each month, a part a night", () => {
+  /** 23:00 in Manila on the given day of October 2026. */
+  const night = (day: number) => `2026-10-${String(day).padStart(2, "0")}T15:00:00Z`;
+
+  function snapshots(): SentDocument[] {
+    return documents().filter((document) => document.fileName.startsWith("backup-snapshot-"));
+  }
+
+  it("Happy path — part 1 on the 1st", async () => {
+    // Entry 1 is dated and stored long before the entries file's window; entry 2 is removed.
+    await insertEntry({ id: 1, sourceMessageId: 1, spentOn: "2025-01-05", createdAt: "2025-01-05T03:00:00.000Z" });
+    await insertEntry({ id: 2, sourceMessageId: 2, deletedAt: "2026-09-29T05:00:00.000Z", deletedBy: 1001 });
+    await insertEntry({ id: 3, sourceMessageId: 3 });
+
+    await fire(night(1));
+
+    expect(documents().map((document) => document.fileName)).toEqual([
+      "backup-entries-2026-10-01.csv",
+      "backup-keywords-2026-10-01.csv",
+      "backup-snapshot-part-1-2026-10-01.csv",
+    ]);
+    const [snapshot] = snapshots();
+    expect(snapshot?.caption).toBe("🗄 Snapshot part 1 of 1 · ids 1–3 · Oct 1 · 3 entries");
+    expect(snapshot?.chatId).toBe(String(GROUP));
+    expect(snapshot?.disableNotification).toBe("true");
+    // The same header as the entries file, so the restore script reads it as one.
+    expect(rows(snapshot!.text, BACKUP_HEADER).map((line) => Number(line.split(",")[0]))).toEqual([1, 2, 3]);
+  });
+
+  it("Happy path — part 2 on the 2nd", async () => {
+    await insertEntry({ id: 1, sourceMessageId: 1 });
+    await insertEntry({ id: 1001, sourceMessageId: 1001 });
+    await insertEntry({ id: 1500, sourceMessageId: 1500 });
+
+    await fire(night(2));
+
+    const [snapshot] = snapshots();
+    expect(snapshot?.fileName).toBe("backup-snapshot-part-2-2026-10-02.csv");
+    expect(snapshot?.caption).toBe("🗄 Snapshot part 2 of 2 · ids 1001–1500 · Oct 2 · 2 entries");
+    expect(rows(snapshot!.text, BACKUP_HEADER).map((line) => Number(line.split(",")[0]))).toEqual([1001, 1500]);
+  });
+
+  it("Edge case — the ledger ends before the part", async () => {
+    await insertEntry({ id: 3 });
+
+    await fire(night(2));
+
+    expect(documents()).toHaveLength(2);
+    expect(snapshots()).toEqual([]);
+  });
+
+  it("Edge case — after night 28", async () => {
+    await insertEntry({ id: 28500, sourceMessageId: 28500 });
+
+    await fire(night(29));
+
+    expect(documents().map((document) => document.fileName)).toEqual([
+      "backup-entries-2026-10-29.csv",
+      "backup-keywords-2026-10-29.csv",
+    ]);
+  });
+
+  it("Failure — a repeated run sends only what is left", async () => {
+    await insertEntry({ id: 3 });
+    await env.DB.prepare(
+      `INSERT INTO job_sends (job, scheduled_date, part, chat_id, message_id, sent_at) VALUES
+         ('nightly_backup', '2026-10-01', 'entries', ?1, 1, '2026-10-01T15:00:01.000Z'),
+         ('nightly_backup', '2026-10-01', 'keywords', ?1, 2, '2026-10-01T15:00:02.000Z')`,
+    )
+      .bind(GROUP)
+      .run();
+
+    await fire(night(1));
+
+    expect(documents().map((document) => document.fileName)).toEqual(["backup-snapshot-part-1-2026-10-01.csv"]);
+    expect(await readRun(env.DB, "nightly_backup", "2026-10-01")).toMatchObject({ status: "done" });
+  });
+});
+
 describe("send backups to the configured chat", () => {
   it("Happy path — no setting", async () => {
-    expect((env as unknown as Record<string, unknown>).BACKUP_CHAT_ID).toBeUndefined();
+    expect((envWith({}) as unknown as Record<string, unknown>).BACKUP_CHAT_ID).toBeUndefined();
     await fire(T_23);
     expect(documents().map((document) => document.chatId)).toEqual([String(GROUP), String(GROUP)]);
   });
@@ -278,5 +361,131 @@ describe("send backups to the configured chat", () => {
   it("Edge case — a supergroup id given as text", async () => {
     await fire(T_23, envWith({ BACKUP_CHAT_ID: "-1001234567890" }));
     expect(documents().map((document) => document.chatId)).toEqual(["-1001234567890", "-1001234567890"]);
+  });
+});
+
+describe("tell the group when a backup did not finish", () => {
+  /** 03:00 on 2026-10-01 in Manila: the first tick after the backup's 3-hour window. */
+  const T_03 = "2026-09-30T19:00:00Z";
+  const T_04 = "2026-09-30T20:00:00Z";
+  const FAILED_RUN = { job: "nightly_backup", scheduledDate: "2026-09-30", scheduledHour: 23 } as const;
+
+  interface AlertPayload {
+    chat_id: number;
+    text: string;
+    disable_notification?: boolean;
+  }
+
+  beforeEach(() => {
+    telegram.setResult("sendMessage", {
+      message_id: 4000,
+      date: Math.floor(Date.parse(T_03) / 1000),
+      chat: { id: GROUP, type: "supergroup" },
+      text: "",
+    });
+  });
+
+  function alerts(): AlertPayload[] {
+    return telegram
+      .callsTo("sendMessage")
+      .filter((call) => !call.failed)
+      .map((call) => call.payload as AlertPayload);
+  }
+
+  function events(name: string): Record<string, unknown>[] {
+    return logEntries(logSpy).filter((entry) => entry["event"] === name);
+  }
+
+  it("Happy path — a backup that finished", async () => {
+    await fire(T_23);
+    await fire(T_03);
+    expect(alerts()).toEqual([]);
+  });
+
+  it("Failure — every attempt in the window fails", async () => {
+    const broken = envWith({ BACKUP_CHAT_ID: "ana" });
+    for (const iso of [T_23, T_00, "2026-09-30T17:00:00Z", "2026-09-30T18:00:00Z"]) await fire(iso, broken);
+    expect(await readRun(env.DB, "nightly_backup", "2026-09-30")).toMatchObject({ status: "failed", attempts: 4 });
+    expect(alerts()).toEqual([]);
+
+    await fire(T_03, broken);
+    await fire(T_04, broken);
+
+    expect(exporter.jobs).toEqual([expect.objectContaining({ name: "nightly_backup", alertOnFailure: true })]);
+    expect(alerts()).toEqual([
+      expect.objectContaining({
+        chat_id: GROUP,
+        text:
+          "⚠️ Job nightly_backup did not finish · Sep 30 23:00 · failed, 4 attempts\n" +
+          "It is not tried again for that date. /ping shows each job's last run.",
+        disable_notification: true,
+      }),
+    ]);
+    expect(events("job_alert_sent")).toEqual([
+      { event: "job_alert_sent", job: "nightly_backup", scheduled_date: "2026-09-30" },
+    ]);
+    expect(await readRun(env.DB, "nightly_backup", "2026-09-30")).toMatchObject({ status: "failed", attempts: 4 });
+    expect(documents()).toEqual([]);
+  });
+
+  it("Failure — the alert cannot be sent", async () => {
+    await insertRun(env.DB, { ...FAILED_RUN, status: "failed", attempts: 4, lastError: "boom" });
+    telegram.failNext("sendMessage");
+
+    await fire(T_03);
+    expect(alerts()).toEqual([]);
+    expect(events("job_alert_failed")).toEqual([
+      { event: "job_alert_failed", job: "nightly_backup", scheduled_date: "2026-09-30" },
+    ]);
+
+    await fire(T_04);
+    expect(alerts()).toHaveLength(1);
+  });
+
+  it("Edge case — an attempt that was cut off", async () => {
+    await insertRun(env.DB, {
+      ...FAILED_RUN,
+      status: "running",
+      attempts: 2,
+      createdAt: "2026-09-30T15:00:00.000Z",
+      startedAt: "2026-09-30T16:00:00.000Z",
+    });
+
+    await fire(T_03);
+
+    expect(alerts().map((alert) => alert.text.split("\n")[0])).toEqual([
+      "⚠️ Job nightly_backup did not finish · Sep 30 23:00 · interrupted, 2 attempts",
+    ]);
+  });
+
+  it("Edge case — the first skip of a new database", async () => {
+    // As on the first deploy: no earlier run record of the backup exists.
+    await fire(T_03);
+    await fire(T_04);
+    expect((await readRun(env.DB, "nightly_backup", "2026-09-30"))?.status).toBe("skipped");
+    expect(alerts()).toEqual([]);
+  });
+
+  it("Failure — a backup that ran before is skipped", async () => {
+    await insertRun(env.DB, { ...FAILED_RUN, scheduledDate: "2026-09-29", status: "done" });
+
+    await fire(T_03);
+    expect((await readRun(env.DB, "nightly_backup", "2026-09-30"))?.status).toBe("skipped");
+    await fire(T_04);
+    await fire("2026-09-30T21:00:00Z");
+
+    expect(alerts()).toEqual([
+      expect.objectContaining({
+        chat_id: GROUP,
+        text:
+          "⚠️ Job nightly_backup did not run · Sep 30 23:00 · skipped\n" +
+          "No tick came in its catch-up window, so it is not tried again for that date. /ping shows each job's last run.",
+        disable_notification: true,
+      }),
+    ]);
+    expect(events("job_alert_sent")).toEqual([
+      { event: "job_alert_sent", job: "nightly_backup", scheduled_date: "2026-09-30" },
+    ]);
+    expect(await readRun(env.DB, "nightly_backup", "2026-09-30")).toMatchObject({ status: "skipped", attempts: 0 });
   });
 });

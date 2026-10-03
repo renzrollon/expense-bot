@@ -21,6 +21,8 @@ export interface PhotoOptions extends UpdateOptions {
 
 export interface CallbackOptions extends UpdateOptions {
   data?: string;
+  /** The message that the pressed message replies to. */
+  replyToMessageId?: number;
 }
 
 /**
@@ -154,6 +156,17 @@ export function callbackUpdate(options: CallbackOptions = {}): Update {
         date: b.date,
         chat: b.chat,
         text: "Choose",
+        ...(options.replyToMessageId === undefined
+          ? {}
+          : {
+              reply_to_message: {
+                message_id: options.replyToMessageId,
+                date: b.date,
+                chat: b.chat,
+                text: "",
+                reply_to_message: undefined,
+              },
+            }),
       },
     },
   };

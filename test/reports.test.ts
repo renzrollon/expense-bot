@@ -34,7 +34,7 @@ interface SendPayload {
   chat_id?: unknown;
   text: string;
   parse_mode?: unknown;
-  reply_parameters?: { message_id?: unknown };
+  reply_parameters?: { message_id?: unknown; allow_sending_without_reply?: unknown };
   link_preview_options?: unknown;
 }
 
@@ -99,7 +99,7 @@ function replyText(call: TelegramCall | undefined): string {
   expect(call).toBeDefined();
   const payload = call?.payload as SendPayload;
   expect(payload.chat_id).toBe(ALLOWED_CHAT_ID);
-  expect(payload.reply_parameters?.message_id).toBe(COMMAND_MESSAGE_ID);
+  expect(payload.reply_parameters).toEqual({ message_id: COMMAND_MESSAGE_ID, allow_sending_without_reply: true });
   expect(payload.link_preview_options).toEqual({ is_disabled: true });
   expect(payload).not.toHaveProperty("parse_mode");
   return payload.text;

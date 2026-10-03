@@ -54,3 +54,8 @@ playwright/.cache/
 # Backups
 *.bak
 *.bak.*
+
+# Ledger data used by the restore runbook (docs/backup-restore.md)
+/backups/
+/restore.sql
+/before-restore*.sql

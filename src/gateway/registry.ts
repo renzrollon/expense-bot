@@ -27,6 +27,17 @@ export interface JobRegistration {
   name: string;
   schedule: JobSchedule;
   run: (job: JobContext) => Promise<void>;
+  /**
+   * How many hours after its slot a run may still start: a whole number, shorter than
+   * the time between two slots. Later, the scheduled date is skipped. The default is 3.
+   */
+  catchUpHours?: number;
+  /**
+   * When true, the scheduler tells the group once when the catch-up window of a
+   * scheduled date has ended and the run is still not done, or when the date was
+   * skipped after the job had run before.
+   */
+  alertOnFailure?: boolean;
 }
 
 export type JobSchedule =
@@ -44,7 +55,7 @@ export interface JobContext {
   /**
    * The local date (YYYY-MM-DD, household timezone) of the slot this run belongs to.
    * Decide the day, week or month a job covers from this, never from `now`:
-   * a run up to 3 hours late still belongs to its scheduled date.
+   * a late run, inside the job's catch-up window, still belongs to its scheduled date.
    */
   scheduledDate: string;
 }

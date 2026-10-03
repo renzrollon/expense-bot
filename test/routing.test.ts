@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { BotError } from "grammy";
 import type { Update } from "grammy/types";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildBot } from "../src/gateway/bot";
 import type { Config } from "../src/gateway/config";
 import type { FeatureModule } from "../src/gateway/registry";
@@ -9,6 +9,7 @@ import { BOT_INFO, BOT_TOKEN, BOT_USERNAME, HOUSEHOLD_TZ, MEMBER_A, MEMBER_B } f
 import { useCleanTables } from "./helpers/db";
 import { gatewayState } from "./helpers/gateway-state";
 import { probeModule } from "./helpers/probe";
+import { logEntries } from "./helpers/scheduler";
 import { installTelegramStub, type TelegramStub } from "./helpers/telegram";
 import { callbackUpdate, editedMessageUpdate, messageUpdate, photoUpdate } from "./helpers/updates";
 
@@ -153,6 +154,36 @@ describe("Button routing", () => {
     expect(probe.calls).toEqual([]);
     expect(telegram.calls.map((call) => call.method)).toEqual(["answerCallbackQuery"]);
     expect(telegram.calls[0]?.payload).toMatchObject({ callback_query_id: "cb-7", text: STALE_BUTTON });
+  });
+
+  it("Unknown prefix, pressed too late to answer", async () => {
+    const probe = probeModule({ callbacks: ["x"] });
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    telegram.failNext("answerCallbackQuery", {
+      error_code: 400,
+      description: "Bad Request: query is too old and response timeout expired or query ID is invalid",
+    });
+
+    try {
+      await expect(handle([probe.module], callbackUpdate({ data: "gone:42", updateId: 8 }))).resolves.toBeUndefined();
+      expect(telegram.callsTo("answerCallbackQuery")[0]?.failed).toBe(true);
+      expect(logEntries(logSpy)).toEqual([{ event: "callback_answer_failed", update_id: 8 }]);
+    } finally {
+      logSpy.mockRestore();
+    }
+  });
+
+  it("Unknown prefix, answered after a short rate limit", async () => {
+    const probe = probeModule({ callbacks: ["x"] });
+    telegram.failNext("answerCallbackQuery", {
+      error_code: 429,
+      description: "Too Many Requests: retry after 0",
+      parameters: { retry_after: 0 },
+    });
+
+    await handle([probe.module], callbackUpdate({ data: "gone:42", updateId: 9 }));
+
+    expect(telegram.callsTo("answerCallbackQuery").map((call) => call.failed ?? false)).toEqual([true, false]);
   });
 
   it("Data without a usable prefix", async () => {

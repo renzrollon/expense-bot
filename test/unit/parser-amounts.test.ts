@@ -18,7 +18,6 @@ describe("readAmount: amounts", () => {
     ["two decimal places", "250.50", amount(25050)],
     ["a value that floating point rounds", "1.15", amount(115)],
     ["the smallest amount", "0.01", amount(1)],
-    ["leading zeros", "007", amount(700)],
     ["a thousands separator", "1,500", amount(150000)],
     ["a thousands separator with decimals", "1,500.50", amount(150050)],
     ["the largest amount", "9,999,999.99", amount(999999999)],
@@ -58,6 +57,9 @@ describe("readAmount: not an amount", () => {
   it.each<[string, string]>([
     ["eight plain digits", "12345678"],
     ["a phone number", "09171234567"],
+    ["leading zeros", "007"],
+    ["a phone prefix", "0917"],
+    ["a number with a plus sign", "+1"],
     ["three decimal places", "45.678"],
     ["three decimal places below one", "0.001"],
     ["three decimal places ending in zeros", "250.500"],

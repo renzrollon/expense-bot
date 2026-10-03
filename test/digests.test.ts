@@ -190,6 +190,24 @@ describe("The system SHALL send a weekly digest on Sunday at 19:00", () => {
     expect(text).not.toContain("₱999");
   });
 
+  it("Happy path — a digest a day late", async () => {
+    await store(100, "dining", "2026-10-04");
+
+    // Monday 19:00, exactly 24 hours after the slot.
+    await fire(build(), "2026-10-05T11:00:00Z");
+
+    expect(sent().map((payload) => lines(payload.text)[0])).toEqual(["📊 Weekly digest · Sep 28 to Oct 4"]);
+  });
+
+  it("Failure — a digest more than a day late", async () => {
+    await store(100, "dining", "2026-10-04");
+
+    await fire(build(), "2026-10-05T12:00:00Z");
+
+    expect(sent()).toEqual([]);
+    expect((await readRun(env.DB, "weekly_digest", "2026-10-04"))?.status).toBe("skipped");
+  });
+
   it("Edge case — the month to date starts on the 1st", async () => {
     await store(5000, "groceries", "2026-09-30");
     await store(300, "dining", "2026-10-02");
@@ -289,8 +307,28 @@ describe("The system SHALL send a monthly recap on the 1st at 08:00", () => {
 
     await fire(build(), "2027-03-01T00:00:00Z");
 
-    expect(sent()).toHaveLength(1);
-    expect(lines(sent()[0]!.text).slice(-2)).toEqual(["Daily average: ₱1", "Days with entries: 1 of 28"]);
+    // The same tick catches up the weekly digest of Sunday Feb 28, 13 hours late.
+    const recaps = sent().filter((payload) => payload.text.startsWith("📊 February 2027"));
+    expect(recaps).toHaveLength(1);
+    expect(lines(recaps[0]!.text).slice(-2)).toEqual(["Daily average: ₱1", "Days with entries: 1 of 28"]);
+  });
+
+  it("Happy path — a recap two days late", async () => {
+    await store(250, "dining", "2026-09-29", "lunch");
+
+    // Oct 3 at 08:00, exactly 48 hours after the slot.
+    await fire(build(), "2026-10-03T00:00:00Z");
+
+    expect(sent().map((payload) => lines(payload.text)[0])).toEqual(["📊 September 2026"]);
+  });
+
+  it("Failure — a recap more than two days late", async () => {
+    await store(250, "dining", "2026-09-29", "lunch");
+
+    await fire(build(), "2026-10-03T01:00:00Z");
+
+    expect(sent()).toEqual([]);
+    expect((await readRun(env.DB, "monthly_recap", "2026-10-01"))?.status).toBe("skipped");
   });
 
   it("Edge case — only entries that are not counted", async () => {

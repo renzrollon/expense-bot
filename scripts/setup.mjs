@@ -54,7 +54,7 @@ export async function run(argv, deps) {
   try {
     switch (step) {
       case "bot-info":
-        return await botInfoStep(deps, telegram);
+        return await botInfoStep(deps, telegram, rest);
       case "discover":
         return await discoverStep(deps, telegram);
       case "webhook":
@@ -110,9 +110,11 @@ function secretStep(deps) {
   return 0;
 }
 
-async function botInfoStep(deps, telegram) {
+async function botInfoStep(deps, telegram, args) {
   const me = await telegram("getMe");
-  deps.print(JSON.stringify(me));
+  const json = JSON.stringify(me);
+  // With --escaped, the line is the value to paste after "BOT_INFO": in wrangler.jsonc.
+  deps.print(args.includes("--escaped") ? JSON.stringify(json) : json);
   if (me && me.can_read_all_group_messages === false) deps.printError(TEXT.privacyOn);
   return 0;
 }

@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
 import { totalsByCategory } from "../src/ledger";
 import { ALLOWED_CHAT_ID } from "./helpers/constants";
-import { BEN, button, CONFIRMATION, ENTRY, useCorrectionsHarness } from "./helpers/ledger-fixtures";
+import { BEN, button, CONFIRMATION, ENTRY, MESSAGE, useCorrectionsHarness } from "./helpers/ledger-fixtures";
 
 const STALE = "This button no longer works.";
 const TODAY = { from: "2026-09-29", to: "2026-09-29" };
@@ -298,6 +298,66 @@ describe("The system SHALL ignore button data it cannot use", () => {
 
     for (const data of ["u:07", "u: 7", "u:7.0", "u:+7"]) await expectIgnored(data);
     expect((await h.entry(ENTRY.lunch)).deleted_at).toBeNull();
+  });
+});
+
+describe("The system SHALL act on a press only from the entry's confirmation", () => {
+  async function expectRefused(data: string, options: Parameters<typeof h.press>[1]): Promise<void> {
+    const before = await h.entries();
+    const callsBefore = h.telegram.calls.length;
+
+    const response = await h.press(data, options);
+
+    expect(response.status, data).toBe(200);
+    expect(await h.entries(), data).toEqual(before);
+    expect(h.telegram.calls.slice(callsBefore).map((call) => call.method)).toEqual(["answerCallbackQuery"]);
+    expect(h.answers().at(-1)).toBe(STALE);
+  }
+
+  it("Happy path — a button on the entry's own confirmation", async () => {
+    await h.seedPreamble();
+
+    await h.press(`u:${ENTRY.lunch}`, { messageId: CONFIRMATION.lunch });
+
+    expect((await h.entry(ENTRY.lunch)).deleted_at).not.toBeNull();
+    expect(h.answers()).toEqual(["Removed."]);
+  });
+
+  it("Failure — an old button whose entry id was taken by a newer entry", async () => {
+    // The ledger was emptied, and the next entry took id 1 again.
+    const [reused] = await h.sendText("rent 12000", { messageId: 71, at: h.now, replyId: 950 });
+    expect(reused).toBeDefined();
+    const oldConfirmation = 400;
+
+    for (const data of [`u:${reused}`, `c:${reused}`, `s:${reused}:dining`, `r:${reused}`, `b:${reused}`]) {
+      await expectRefused(data, { messageId: oldConfirmation });
+    }
+    const learned = await env.DB.prepare("SELECT COUNT(*) AS count FROM keyword_map").first<{ count: number }>();
+    expect(learned?.count).toBe(0);
+  });
+
+  it("Failure — a button on the confirmation of another message", async () => {
+    await h.seedPreamble();
+
+    await expectRefused(`u:${ENTRY.lunch}`, { messageId: CONFIRMATION.multi });
+    await expectRefused(`s:${ENTRY.acai}:dining`, { messageId: CONFIRMATION.lunch });
+  });
+
+  it("Edge case — the confirmation id was never saved", async () => {
+    await h.seedPreamble();
+    await env.DB.prepare("UPDATE expenses SET confirmation_message_id = NULL WHERE id = ?").bind(ENTRY.lunch).run();
+
+    await expectRefused(`u:${ENTRY.lunch}`, { messageId: CONFIRMATION.lunch });
+    await expectRefused(`u:${ENTRY.lunch}`, { messageId: CONFIRMATION.lunch, replyToMessageId: MESSAGE.multi });
+
+    const response = await h.press(`u:${ENTRY.lunch}`, {
+      messageId: CONFIRMATION.lunch,
+      replyToMessageId: MESSAGE.lunch,
+    });
+
+    expect(response.status).toBe(200);
+    expect((await h.entry(ENTRY.lunch)).deleted_at).not.toBeNull();
+    expect(h.answers().at(-1)).toBe("Removed.");
   });
 });
 

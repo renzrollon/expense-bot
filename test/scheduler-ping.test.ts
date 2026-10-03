@@ -88,7 +88,7 @@ describe("The system SHALL show each job's last run in /ping", () => {
 
   it("Edge case — states, counts and the latest record", async () => {
     await insertRun(env.DB, { job: "a", status: "failed", attempts: 1 });
-    await insertRun(env.DB, { job: "b", status: "failed", attempts: 2 });
+    await insertRun(env.DB, { job: "b", status: "failed", attempts: 2, lastError: "Network request for 'sendMessage' failed!" });
     await insertRun(env.DB, { job: "c", status: "running", startedAt: minutesBefore(45) });
     await insertRun(env.DB, { job: "d", scheduledDate: "2026-09-29", status: "done" });
     await insertRun(env.DB, { job: "d", scheduledDate: "2026-09-30", status: "skipped" });
@@ -98,7 +98,7 @@ describe("The system SHALL show each job's last run in /ping", () => {
 
     expect(lines).toEqual([
       "Job a: failed · Sep 30 21:00 · 1 attempt",
-      "Job b: failed · Sep 30 21:00 · 2 attempts",
+      "Job b: failed · Sep 30 21:00 · 2 attempts · Network request for 'sendMessage' failed!",
       "Job c: interrupted · Sep 30 21:00",
       "Job d: skipped · Sep 30 21:00",
     ]);

@@ -22,6 +22,9 @@ export default defineConfig(async () => {
             BOT_INFO: JSON.stringify(BOT_INFO),
             ALLOWED_USER_IDS: ALLOWED_USER_IDS_TEXT,
             HOUSEHOLD_TZ,
+            // Pinned so that the household's own values in wrangler.jsonc never change a test.
+            NUDGE_ENABLED: "true",
+            NUDGE_HOUR: "21",
             TEST_MIGRATIONS: migrations,
           },
         },

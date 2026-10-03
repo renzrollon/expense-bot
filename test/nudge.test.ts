@@ -161,8 +161,8 @@ async function marks(): Promise<DayMarkRow[]> {
 describe("The system SHALL read the nudge settings when it starts", () => {
   it("Happy path — the defaults", () => {
     const registry = buildRegistry([createNudge(readNudgeSettings({}))]);
-    expect(registry.jobs.map((job) => [job.name, job.schedule])).toEqual([
-      ["evening_nudge", { every: "day", hour: 21 }],
+    expect(registry.jobs.map((job) => [job.name, job.schedule, job.catchUpHours])).toEqual([
+      ["evening_nudge", { every: "day", hour: 21 }, 2],
     ]);
   });
 
@@ -251,11 +251,25 @@ describe("The system SHALL nudge only when nothing is logged for the day", () =>
   });
 
   it("Edge case — a late run names its own day", async () => {
-    await fire(scheduler(), "2026-09-30T16:00:00Z");
+    // Nudge hour 23; the tick of 00:00 on Oct 1 is 1 hour late.
+    await fire(scheduler(nudge({ enabled: true, hour: 23 })), "2026-09-30T16:00:00Z");
 
     expect(sent()).toHaveLength(1);
     expect(sent()[0]?.text).toContain("Nothing logged for Sep 30 yet");
     expect(sent()[0]?.reply_markup?.inline_keyboard).toEqual(NUDGE_BUTTONS);
+  });
+
+  it("Edge case — 2 hours late still nudges", async () => {
+    await fire(scheduler(), "2026-09-30T15:00:00Z");
+
+    expect(sent().map((payload) => payload.text)).toEqual([NUDGE_TEXT]);
+  });
+
+  it("Failure — more than 2 hours late", async () => {
+    await fire(scheduler(), "2026-09-30T16:00:00Z");
+
+    expect(sent()).toEqual([]);
+    expect((await readRun(env.DB, "evening_nudge", "2026-09-30"))?.status).toBe("skipped");
   });
 });
 

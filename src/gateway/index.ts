@@ -3,6 +3,7 @@ import type { Update } from "grammy/types";
 import { buildBot, type GatewayState } from "./bot";
 import { classifyUpdate, type Decision } from "./classify";
 import { ConfigError, readConfig, type Config } from "./config";
+import { failureReason } from "./failure";
 import { refreshMember } from "./members";
 import { buildRegistry, type FeatureModule, type Registry } from "./registry";
 import { secretMatches } from "./secret";
@@ -119,11 +120,11 @@ export function createGateway(options: GatewayOptions): Gateway {
         retryAfter = recorded === "parked" ? undefined : RETRY_AFTER_SECONDS;
       } catch {
         // The lease recovers the record. No Retry-After (D54).
-        log({ event: "attempt_failed", update_id: updateId, attempt, status: 503 });
+        log({ event: "attempt_failed", update_id: updateId, attempt, status: 503, reason: failureReason(error) });
         log({ event: "outcome_not_recorded", update_id: updateId });
         return empty(503);
       }
-      log({ event: "attempt_failed", update_id: updateId, attempt, status });
+      log({ event: "attempt_failed", update_id: updateId, attempt, status, reason: failureReason(error) });
       return empty(status, retryAfter);
     }
 

@@ -12,9 +12,10 @@ import { rejectionText } from "./format";
  * database's state alone.
  */
 export async function handleCapture(ctx: BotContext): Promise<void> {
-  // 1. Only text (D35).
+  // 1. Only text (D35) that the member typed here: not a forward, and not sent through a bot.
   const message = ctx.message;
   if (message === undefined || typeof message.text !== "string") return;
+  if (message.forward_origin !== undefined || message.via_bot !== undefined) return;
   const text = message.text;
   const { db, timezone, chatId, member, now } = ctx.gateway;
 

@@ -35,7 +35,7 @@ describe("The system SHALL remove the sender's latest entry on /undo", () => {
     const sent = h.sent();
     expect(sent).toHaveLength(1);
     expect(sent[0]?.text).toBe("↩️ Removed ₱150 · ❓ Other · acai");
-    expect(sent[0]?.reply_parameters?.message_id).toBe(COMMAND_ID);
+    expect(sent[0]?.reply_parameters).toEqual({ message_id: COMMAND_ID, allow_sending_without_reply: true });
   });
 
   it("Failure — nothing to undo", async () => {

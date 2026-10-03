@@ -32,8 +32,10 @@ export function readAmount(word: string): AmountReading {
   const [, minus, mark, grouped = "", decimals = "", suffix] = match;
   const marked = mark !== undefined;
 
-  // 2. A long run of plain digits.
-  if (ONLY_DIGITS.test(word) && word.length > MAX_PLAIN_DIGITS) return NOT_AMOUNT;
+  // 2. A long run of plain digits, or one written with a leading zero, such as `0917`.
+  if (ONLY_DIGITS.test(word) && (word.length > MAX_PLAIN_DIGITS || (word.length > 1 && word.startsWith("0")))) {
+    return NOT_AMOUNT;
+  }
 
   // 3. The suffix k moves the decimal point 3 places; decimals are counted as written.
   let whole = grouped.replaceAll(",", "");

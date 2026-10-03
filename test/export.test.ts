@@ -155,7 +155,10 @@ function onlyDocument(): SentDocument {
   const file = payload.files[0]!;
   expect(payload.fields.chat_id).toBe(String(ALLOWED_CHAT_ID));
   expect(payload.fields.document).toBe(`attach://${file.field}`);
-  expect(JSON.parse(payload.fields.reply_parameters ?? "{}")).toMatchObject({ message_id: COMMAND_MESSAGE_ID });
+  expect(JSON.parse(payload.fields.reply_parameters ?? "{}")).toEqual({
+    message_id: COMMAND_MESSAGE_ID,
+    allow_sending_without_reply: true,
+  });
   return { fileName: file.fileName, caption: payload.fields.caption ?? "", text: file.text, fields: payload.fields };
 }
 
@@ -164,9 +167,9 @@ function onlyReply(): string {
   expect(accepted("sendDocument")).toHaveLength(0);
   const calls = accepted("sendMessage");
   expect(calls).toHaveLength(1);
-  const payload = calls[0]!.payload as { chat_id: unknown; text: string; reply_parameters?: { message_id?: unknown } };
+  const payload = calls[0]!.payload as { chat_id: unknown; text: string; reply_parameters?: unknown };
   expect(payload.chat_id).toBe(ALLOWED_CHAT_ID);
-  expect(payload.reply_parameters?.message_id).toBe(COMMAND_MESSAGE_ID);
+  expect(payload.reply_parameters).toEqual({ message_id: COMMAND_MESSAGE_ID, allow_sending_without_reply: true });
   return payload.text;
 }
 
@@ -181,6 +184,20 @@ function rows(text: string): string[] {
 /** The id cell of each row. */
 function ids(text: string): number[] {
   return rows(text).map((row) => Number(row.split(",")[0]));
+}
+
+/** Active entries with ids from 1 to `count`, one statement, all dated `spentOn`. */
+async function insertMany(count: number, spentOn = "2026-09-15"): Promise<void> {
+  await env.DB.prepare(
+    `WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM numbers WHERE n < ?1)
+     INSERT INTO expenses (id, chat_id, source_message_id, item_index, payer_user_id, amount_centavos, currency,
+       description, category_id, category_source, spent_on, raw_text, parser, check_amount,
+       created_at, created_by, updated_at, updated_by)
+     SELECT n, ?2, n, 0, ?3, 25000, 'PHP', 'lunch', 'dining', 'keyword', ?4, 'lunch 250', 'rules', 0, ?5, ?3, ?5, ?3
+     FROM numbers`,
+  )
+    .bind(count, ALLOWED_CHAT_ID, MEMBER_A.id, spentOn, "2026-09-15T02:00:03.000Z")
+    .run();
 }
 
 describe("export entries on /export", () => {
@@ -267,6 +284,31 @@ describe("export entries on /export", () => {
       expect(document.caption).toBe(expected.caption);
       expect(document.text).toBe(expected.text);
     }
+  });
+
+  it("Failure — more entries than one file holds, for all", async () => {
+    await insertMany(1501);
+    await send("/export all");
+    expect(onlyReply()).toBe(
+      "📄 1501 entries are more than one file holds (1500). Export one month at a time, such as /export 2026-09.",
+    );
+  });
+
+  it("Edge case — as many entries as one file holds, for all", async () => {
+    await insertMany(1501);
+    await env.DB.prepare("UPDATE expenses SET deleted_at = ?, deleted_by = ? WHERE id = 1501")
+      .bind("2026-09-16T02:00:00.000Z", MEMBER_A.id)
+      .run();
+    await send("/export all");
+    const document = onlyDocument();
+    expect(document.caption).toBe("📄 All months · 1500 entries");
+    expect(rows(document.text)).toHaveLength(1500);
+  });
+
+  it("Edge case — a month has no limit", async () => {
+    await insertMany(1501);
+    await send("/export 2026-09");
+    expect(onlyDocument().caption).toBe("📄 September 2026 · 1501 entries");
   });
 
   it("Edge case — a name or a category that is not known", async () => {

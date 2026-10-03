@@ -17,6 +17,8 @@ export interface MultipartPayload {
 export interface InjectedError {
   error_code: number;
   description: string;
+  /** Telegram's `parameters`, such as the `retry_after` of a rate limit. */
+  parameters?: { retry_after?: number };
 }
 
 export interface TelegramStub {
